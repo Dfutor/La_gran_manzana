@@ -3,121 +3,80 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>La Gran Manzana · Inventario</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='18' r='12' fill='%2343a047'/%3E%3Cpath d='M16 7c0-3 2-5 5-5' stroke='%235d4037' stroke-width='2.5' fill='none'/%3E%3C/svg%3E">
+  <title>La Gran Manzana · Prueba del API</title>
   <link rel="stylesheet" href="estilos.css">
 </head>
 <body>
-  <header class="cabecera">
-    <div class="marca">
-      <span class="logo" aria-hidden="true">🍏</span>
-      <div>
-        <h1>La Gran Manzana</h1>
-        <p class="sub">Inventario por lotes (FEFO) y recomendación · Melgar, Tolima</p>
-      </div>
-    </div>
-    <div id="estado" class="estado estado-cargando" role="status" aria-live="polite">
-      <span class="punto"></span><span id="estado-texto">Verificando conexión…</span>
-    </div>
-  </header>
+  <h1>La Gran Manzana — prueba del API</h1>
+  <p>Estado: <span id="estado">verificando…</span></p>
 
-  <nav class="pestanas" role="tablist" aria-label="Secciones">
-    <button role="tab" aria-selected="true" data-tab="productos">Productos</button>
-    <button role="tab" aria-selected="false" data-tab="necesidades">¿Qué necesita el cliente?</button>
-    <button role="tab" aria-selected="false" data-tab="alertas">Alertas</button>
-    <button role="tab" aria-selected="false" data-tab="categorias">Categorías</button>
-    <button role="tab" aria-selected="false" data-tab="probador">Probador de API</button>
+  <nav id="pestanas">
+    <button data-tab="productos">Productos</button>
+    <button data-tab="necesidades">¿Qué necesita el cliente?</button>
+    <button data-tab="alertas">Alertas</button>
+    <button data-tab="categorias">Categorías</button>
+    <button data-tab="probador">Probador de API</button>
   </nav>
+  <hr>
 
-  <main>
-    <!-- 1. Productos -->
-    <section id="tab-productos" class="panel" role="tabpanel">
-      <form id="form-buscar" class="barra-busqueda">
-        <input id="q" type="search" placeholder="Buscar por nombre, marca o código de barras…" autocomplete="off" aria-label="Buscar productos">
-        <button type="submit" class="btn">Buscar</button>
-      </form>
-      <p class="ayuda">Haz clic en un producto para ver su ficha, etiquetas y lotes en orden FEFO. Las filas en rojo tienen stock en o por debajo del mínimo.</p>
-      <div id="productos-msg" class="msg" hidden></div>
-      <div class="tabla-scroll">
-        <table class="tabla clicable">
-          <thead><tr><th>Nombre</th><th>Marca</th><th>Presentación</th><th>Categoría</th><th class="num">Precio</th><th class="num">Stock</th></tr></thead>
-          <tbody id="productos-cuerpo"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- 2. Necesidades -->
-    <section id="tab-necesidades" class="panel" role="tabpanel" hidden>
-      <p class="ayuda">Toca la necesidad del cliente para ver los productos recomendados y su disponibilidad.</p>
-      <div id="necesidades-botones" class="chips"></div>
-      <div id="necesidades-msg" class="msg" hidden></div>
-      <div id="necesidades-resultado"></div>
-    </section>
-
-    <!-- 3. Alertas -->
-    <section id="tab-alertas" class="panel" role="tabpanel" hidden>
-      <div class="encabezado-seccion">
-        <h2>Vencimientos</h2>
-        <div class="leyenda">
-          <span class="nivel nivel-vencido">vencido</span>
-          <span class="nivel nivel-liquidar">liquidar</span>
-          <span class="nivel nivel-devolver">devolver</span>
-        </div>
-      </div>
-      <div id="venc-msg" class="msg" hidden></div>
-      <div class="tabla-scroll">
-        <table class="tabla">
-          <thead><tr><th>Nivel</th><th>Producto</th><th>Lote</th><th>Vence</th><th class="num">Días</th><th class="num">Cant.</th><th>Proveedor</th><th>¿Acepta devolución?</th></tr></thead>
-          <tbody id="venc-cuerpo"></tbody>
-        </table>
-      </div>
-
-      <h2>Stock bajo</h2>
-      <div id="stock-msg" class="msg" hidden></div>
-      <div class="tabla-scroll">
-        <table class="tabla">
-          <thead><tr><th>Producto</th><th>Marca</th><th>Categoría</th><th class="num">Stock</th><th class="num">Mínimo</th></tr></thead>
-          <tbody id="stock-cuerpo"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- 4. Categorías -->
-    <section id="tab-categorias" class="panel" role="tabpanel" hidden>
-      <div class="dos-columnas">
-        <div>
-          <h2>Nueva categoría</h2>
-          <form id="form-categoria" class="tarjeta">
-            <label for="cat-nombre">Nombre (máx. 80 caracteres)</label>
-            <input id="cat-nombre" type="text" maxlength="200" autocomplete="off" placeholder="Ej.: Superalimentos">
-            <button type="submit" class="btn">Crear</button>
-            <div id="cat-resultado" class="msg" hidden></div>
-          </form>
-        </div>
-        <div>
-          <h2>Categorías existentes <span id="cat-conteo" class="conteo"></span></h2>
-          <div id="cat-msg" class="msg" hidden></div>
-          <ul id="cat-lista" class="lista"></ul>
-        </div>
-      </div>
-    </section>
-
-    <!-- 5. Probador -->
-    <section id="tab-probador" class="panel" role="tabpanel" hidden>
-      <p class="ayuda">Prueba cada endpoint del API. Puedes editar la ruta (por ejemplo cambiar el id o el parámetro <code>q</code>) y el cuerpo JSON del POST.</p>
-      <div id="probador-lista"></div>
-    </section>
-  </main>
-
-  <dialog id="ficha" aria-labelledby="ficha-titulo">
-    <div class="ficha-cabecera">
-      <h2 id="ficha-titulo">Producto</h2>
-      <button type="button" class="btn-cerrar" id="ficha-cerrar" aria-label="Cerrar">✕</button>
+  <section id="tab-productos" class="panel">
+    <form id="form-buscar">
+      <input id="q" type="search" placeholder="Nombre, marca o código de barras" aria-label="Buscar">
+      <button type="submit">Buscar</button>
+    </form>
+    <p class="msg" id="productos-msg"></p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Nombre</th><th>Marca</th><th>Presentación</th><th>Categoría</th><th>Precio</th><th>Stock</th></tr></thead>
+        <tbody id="productos-cuerpo"></tbody>
+      </table>
     </div>
-    <div id="ficha-cuerpo"></div>
-  </dialog>
+    <p><small>Clic en un producto para ver su ficha. En rojo: stock en o por debajo del mínimo.</small></p>
+    <div id="ficha"></div>
+  </section>
 
-  <footer class="pie">Calidad de Software · Universidad Piloto de Colombia, seccional Alto Magdalena</footer>
+  <section id="tab-necesidades" class="panel" hidden>
+    <p>1. Necesidad del cliente:</p>
+    <div id="necesidades-botones"></div>
+    <p>2. Evitar productos con (opcional):</p>
+    <div id="contra-opciones"></div>
+    <label><input type="checkbox" id="solo-disponibles"> Solo con existencias</label>
+    <p class="msg" id="necesidades-msg"></p>
+    <div id="necesidades-resultado"></div>
+  </section>
+
+  <section id="tab-alertas" class="panel" hidden>
+    <h2>Vencimientos</h2>
+    <p class="msg" id="venc-msg"></p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Nivel</th><th>Producto</th><th>Lote</th><th>Vence</th><th>Días</th><th>Cant.</th><th>Valor en riesgo</th><th>Acción sugerida</th></tr></thead>
+        <tbody id="venc-cuerpo"></tbody>
+      </table>
+    </div>
+    <h2>Stock bajo</h2>
+    <p class="msg" id="stock-msg"></p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Producto</th><th>Categoría</th><th>Stock</th><th>Mínimo</th><th>Faltan</th></tr></thead>
+        <tbody id="stock-cuerpo"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tab-categorias" class="panel" hidden>
+    <form id="form-categoria">
+      <input id="cat-nombre" type="text" placeholder="Nueva categoría (máx. 80)" aria-label="Nombre">
+      <button type="submit">Crear</button>
+    </form>
+    <p class="msg" id="cat-resultado"></p>
+    <ul id="cat-lista"></ul>
+  </section>
+
+  <section id="tab-probador" class="panel" hidden>
+    <p><small>Edita la ruta o el cuerpo y pulsa Enviar.</small></p>
+    <div id="probador-lista"></div>
+  </section>
 
   <script src="app.js"></script>
 </body>

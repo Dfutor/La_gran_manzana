@@ -6,7 +6,8 @@ de la tienda naturista «La Gran Manzana» (Melgar, Tolima). Proyecto de Calidad
 | | |
 |---|---|
 | **URL base del API** | `http://158.158.17.188/api` |
-| **Frontend de prueba** | `http://158.158.17.188/granmanzana/` (incluye un *Probador de API*) |
+| **Frontend de prueba** | `http://158.158.17.188/granmanzana/` (básico, con *Probador de API*) |
+| **Documentación privada + colección Postman** | `http://158.158.17.188/granmanzana/docs/` (usuario y contraseña) |
 | **Formato** | JSON en UTF-8 |
 | **Autenticación** | Ninguna por ahora (versión de prueba) |
 | **CORS** | `Access-Control-Allow-Origin: *` |
@@ -27,12 +28,17 @@ de la tienda naturista «La Gran Manzana» (Melgar, Tolima). Proyecto de Calidad
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/api/salud` | Estado del API y de MySQL |
-| GET | `/api/categorias` | Lista de categorías |
+| GET | `/api/categorias` | Lista de categorías con su número de productos |
+| GET | `/api/categorias/{id}` | Una categoría |
 | POST | `/api/categorias` | Crea una categoría |
+| DELETE | `/api/categorias/{id}` | Elimina una categoría **sin productos** |
+| GET | `/api/proveedores` | Proveedores y si aceptan devolución |
 | GET | `/api/productos?q=texto` | Busca productos activos por nombre, marca o código de barras |
 | GET | `/api/productos/{id}` | Ficha, etiquetas y lotes FEFO de un producto |
+| GET | `/api/productos/{id}/plan-fefo?cantidad=N` | Simula de qué lotes saldría una venta (no modifica nada) |
 | GET | `/api/etiquetas?tipo=…` | Etiquetas activas (filtro opcional por tipo) |
-| GET | `/api/etiquetas/{id}/productos` | Productos recomendados para una etiqueta |
+| GET | `/api/etiquetas/{id}/productos` | Productos de una etiqueta |
+| GET | `/api/recomendaciones?necesidad=ID&evitar=ID,ID&disponibles=1` | Recomendación por necesidad excluyendo contraindicaciones |
 | GET | `/api/alertas/stock-bajo` | Productos con stock vigente ≤ stock mínimo |
 | GET | `/api/alertas/vencimientos` | Lotes dentro de la ventana de alerta, con su nivel |
 
@@ -112,6 +118,32 @@ curl -i 'http://158.158.17.188/api/productos?q=gel'
   }
 ]
 ```
+
+### GET /api/productos/{id}/plan-fefo?cantidad=N
+
+Simula una venta de N unidades: reparte la cantidad entre los lotes vendibles empezando por el que vence primero.
+**No modifica el inventario**; es la base del futuro `POST /api/ventas`.
+
+```bash
+curl -i "http://158.158.17.188/api/productos/1/plan-fefo?cantidad=40"
+```
+```json
+{
+  "producto_id": 1,
+  "producto": "Llantén",
+  "cantidad_solicitada": 40,
+  "stock_vigente": 52,
+  "lotes_usados": 2,
+  "asignacion": [
+    { "lote_id": 1, "codigo_lote": "L25E877", "fecha_vencimiento": "2027-04-20", "dias_restantes": 179, "disponible": 32, "tomar": 32, "quedaria": 0 },
+    { "lote_id": 2, "codigo_lote": "L24E695", "fecha_vencimiento": "2028-08-29", "dias_restantes": 676, "disponible": 20, "tomar": 8, "quedaria": 12 }
+  ],
+  "nota": "Simulación: no modifica el inventario."
+}
+```
+- **400** si falta `cantidad` o no es un entero entre 1 y 1 000 000.
+- **404** si el producto no existe.
+- **409** `{"error":"stock insuficiente: se pidieron 60 y hay 52 disponibles en lotes vigentes"}`.
 
 ### GET /api/productos/{id}
 
@@ -198,9 +230,35 @@ curl -i http://158.158.17.188/api/etiquetas/3/productos
 ```
 **404** `{"error":"etiqueta no encontrada"}` si no existe o está inactiva.
 
+### GET /api/recomendaciones?necesidad=ID&evitar=ID,ID&disponibles=1
+
+Recomienda productos para una necesidad del cliente y **excluye** los que tengan alguna de las etiquetas en `evitar`
+(por ejemplo, 11 = embarazo, 13 = hipertensión). Con `disponibles=1` solo devuelve productos con existencias.
+
+```bash
+curl -i "http://158.158.17.188/api/recomendaciones?necesidad=3&evitar=13&disponibles=1"
+```
+```json
+{
+  "necesidad": { "id": 3, "nombre": "Para el gimnasio", "tipo": "necesidad" },
+  "evitando": [ { "id": 13, "nombre": "Precaución en hipertensos", "tipo": "contraindicacion" } ],
+  "productos": [ { "id": 13, "nombre": "Citrulina malato", "stock": 4, "...": "..." } ],
+  "aviso": "Información orientativa (Decreto 3249 de 2006). ..."
+}
+```
+- **400** si falta `necesidad`, si no es numérica, si la etiqueta no es de tipo necesidad o si `evitar` está mal formado (máximo 20 ids).
+- **404** si la necesidad o alguna etiqueta en `evitar` no existe.
+
+### DELETE /api/categorias/{id}
+
+```bash
+curl -i -X DELETE http://158.158.17.188/api/categorias/15
+```
+**204** sin cuerpo si se eliminó. **409** si la categoría tiene productos (las categorías con historial están protegidas). **404** si no existe.
+
 ### GET /api/alertas/stock-bajo
 
-Productos activos con stock vigente menor o igual a su `stock_minimo`, ordenados de menor a mayor stock. Cada elemento tiene la misma forma que en `/api/productos`.
+Productos activos con stock vigente menor o igual a su `stock_minimo`, ordenados de menor a mayor stock. Cada elemento tiene la misma forma que en `/api/productos`, más `faltante_para_minimo`.
 
 ```bash
 curl -i http://158.158.17.188/api/alertas/stock-bajo
@@ -231,9 +289,12 @@ curl -i http://158.158.17.188/api/alertas/vencimientos
     "presentacion": "Por 100 g",
     "fecha_vencimiento": "2026-10-29",
     "cantidad_actual": 16,
+    "costo_unitario": 4500,
+    "valor_en_riesgo": 72000,
     "dias_restantes": 6,
     "dias_alerta_liquidacion": 60,
     "nivel": "liquidar",
+    "accion_sugerida": "Liquidar: rebaja, combo o venta destacada",
     "proveedor": "Granos y Semillas del Centro",
     "proveedor_telefono": "3999923568",
     "acepta_devolucion": false
@@ -249,12 +310,19 @@ curl -i http://158.158.17.188/api/alertas/vencimientos
 | 201 | Recurso creado |
 | 204 | Respuesta a `OPTIONS` (CORS) |
 | 400 | Datos inválidos (JSON mal formado, campo vacío, id o tipo inválido) |
-| 404 | Producto, etiqueta o ruta inexistente |
+| 204 | Eliminado (sin cuerpo) |
+| 404 | Producto, categoría, etiqueta o ruta inexistente |
 | 405 | Método HTTP no soportado |
-| 409 | Conflicto: el registro ya existe |
-| 500 | Error interno (el detalle técnico queda solo en el log del servidor) |
+| 409 | Conflicto: duplicado, categoría en uso o stock insuficiente |
+| 500 | Error interno (el detalle técnico queda solo en el log; el mensaje trae una referencia) |
 
-Todos los errores tienen la forma `{"error": "mensaje"}`.
+Todos los errores tienen la forma `{"error": "mensaje"}`. Cada respuesta trae la cabecera `X-Request-Id`, que también aparece en el log.
+
+## Pruebas con Postman
+
+La colección `granmanzana.postman_collection.json` (6 carpetas, 39 peticiones y 161 pruebas automáticas) se descarga desde la
+documentación privada. Se importa en Postman y se ejecuta con **Run collection**, en orden. Crea sus propias categorías de prueba
+y las elimina al final.
 
 ## Seguridad
 

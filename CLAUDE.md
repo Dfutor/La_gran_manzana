@@ -14,8 +14,10 @@ inventario por lotes con FEFO y consulta/recomendación de productos para la tie
 - `main.go`: configuración, rutas, middlewares (log, CORS, recuperación de panics), servidor y apagado ordenado.
 - `db.go`: lectura de `.env` y pool de MySQL con `mysql.NewConfig()` (ParseTime, 10 conexiones).
 - `handlers.go`: endpoints, modelos y reglas de negocio puras (`clasificarVencimiento`, `validarNombreCategoria`, `escaparLike`).
-- `handlers_test.go`: pruebas en tabla; no requieren base de datos.
-- `web/`: frontend (HTML/CSS/JS puros) embebido con `go:embed` y servido en `/granmanzana/`.
+- `handlers_test.go`: pruebas unitarias en tabla (reglas puras, validaciones, rutas, autenticación de docs); no requieren base de datos.
+- `integracion_test.go`: pruebas contra MySQL real; solo corren con `GM_INTEGRACION=1`. Crean y borran sus propias categorías.
+- `web/`: frontend **deliberadamente básico** (HTML/CSS/JS puros) embebido con `go:embed` y servido en `/granmanzana/`. El diseño visual no es parte de esta entrega.
+- `docs_web/`: documentación privada para los expositores (tutorial de Postman + colección), servida en `/granmanzana/docs/` con HTTP Basic (DOCS_USER/DOCS_PASS en `.env`).
 - `docs/API.md`: documentación para el profesor. `docs/esquema.sql`: esquema sin datos, que es la **fuente de verdad** de columnas, tipos y ENUM.
 
 ## Comandos
@@ -23,7 +25,8 @@ inventario por lotes con FEFO y consulta/recomendación de productos para la tie
 # Probar
 gofmt -l .            # no debe listar nada
 go vet ./...
-go test ./...
+go test ./...                                   # unitarias
+GM_INTEGRACION=1 go test -run Integracion ./... # integración contra MySQL
 
 # Correr en desarrollo (detén antes el servicio, porque usa el mismo puerto)
 sudo systemctl stop granmanzana-api
@@ -57,14 +60,20 @@ Formato de respuestas: JSON UTF-8; errores `{"error":"..."}` con 400/404/405/409
 - `ventas` (medio_pago ENUM efectivo/nequi/daviplata) y `detalle_venta` (`subtotal` es columna GENERADA).
 - `bajas` (motivo y accion_previa son ENUM; `valor_perdido` es columna GENERADA). `usuarios` (rol propietario/empleado).
 
+Para regenerar la colección de Postman, edita `docs_web/granmanzana.postman_collection.json`; cada petición lleva sus pruebas `pm.test`. Debe correr completa sin dejar datos en la base.
+
+Endpoints: salud; categorías (GET lista, GET/{id}, POST, DELETE/{id} solo si no tiene productos); proveedores; productos (búsqueda, ficha, plan-fefo); etiquetas; recomendaciones; alertas (stock-bajo, vencimientos). El detalle está en `docs/API.md`.
+
 Reglas de negocio implementadas:
 - Stock vigente = `COALESCE(SUM(CASE WHEN l.fecha_vencimiento >= CURRENT_DATE THEN l.cantidad_actual ELSE 0 END), 0)` con LEFT JOIN lotes.
 - FEFO: `cantidad_actual > 0 AND fecha_vencimiento >= CURRENT_DATE ORDER BY fecha_vencimiento, id`.
 - Ventana de alerta: `cantidad_actual > 0 AND fecha_vencimiento <= CURRENT_DATE + INTERVAL p.dias_alerta_temprana DAY`.
-- Nivel (en Go): `vencido` si días < 0, `liquidar` si días ≤ dias_alerta_liquidacion, si no `devolver`.
+- Nivel (en Go): `vencido` si días < 0, `liquidar` si días ≤ dias_alerta_liquidacion, si no `devolver`. `sugerirAccion` traduce el nivel en una acción según si el proveedor acepta devolución.
+- `planificarFEFO` (función pura): reparte una cantidad entre lotes por fecha de vencimiento y luego por id, ignorando los vencidos o sin stock. La usa `plan-fefo` y debe reutilizarse en `POST /api/ventas`.
+- Recomendaciones: necesidad (etiqueta de tipo necesidad) + `NOT EXISTS` de las etiquetas a evitar, con placeholders generados por `placeholders(n)`.
 
 ## Pendiente (en este orden)
-1. `POST /api/ventas` con FEFO en una transacción: `SELECT ... FOR UPDATE` sobre los lotes; una venta puede consumir varios lotes; 409 si no alcanza el stock.
+1. `POST /api/ventas` con FEFO en una transacción: `SELECT ... FOR UPDATE` sobre los lotes, reutilizar `planificarFEFO`; una venta puede consumir varios lotes; 409 si no alcanza el stock.
 2. Ingreso de lotes y registro de bajas.
 3. Login con bcrypt (los usuarios de ejemplo tienen `password_hash = 'HASH_DE_EJEMPLO_CAMBIAR'`) y proteger los POST según el rol.
 4. Reportes de ventas y pérdidas.

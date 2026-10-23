@@ -47,6 +47,7 @@ func cargarEnv(ruta string) error {
 type config struct {
 	DBUser, DBPass, DBHost, DBName string
 	Addr                           string
+	DocsUser, DocsPass             string
 }
 
 func leerConfig() (config, error) {
@@ -56,6 +57,9 @@ func leerConfig() (config, error) {
 		DBHost: os.Getenv("DB_HOST"),
 		DBName: os.Getenv("DB_NAME"),
 		Addr:   os.Getenv("APP_ADDR"),
+
+		DocsUser: os.Getenv("DOCS_USER"),
+		DocsPass: os.Getenv("DOCS_PASS"),
 	}
 	if c.DBHost == "" {
 		c.DBHost = "127.0.0.1:3306"

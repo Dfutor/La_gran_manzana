@@ -1,0 +1,1479 @@
+{
+  "info": {
+    "name": "La Gran Manzana - API",
+    "description": "Pruebas del API de inventario por lotes (FEFO) y recomendación de productos de la tienda naturista «La Gran Manzana». Importe la colección y ejecútela completa con Run collection: cada petición trae pruebas automáticas. Cambie la variable base_url si el servidor tiene otra dirección.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test(\"Responde en menos de 2 segundos\", function () {",
+          "    pm.expect(pm.response.responseTime).to.be.below(2000);",
+          "});",
+          "if (pm.response.code !== 204) {",
+          "    pm.test(\"La respuesta es JSON en UTF-8\", function () {",
+          "        pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://158.158.17.188",
+      "type": "string"
+    },
+    {
+      "key": "producto_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "producto_stock",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "categoria_en_uso_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "lote_fefo_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "nombre_prueba",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "nombre_largo",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cat_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cat_iny_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "necesidad_id",
+      "value": "3",
+      "type": "string"
+    },
+    {
+      "key": "contra_id",
+      "value": "12",
+      "type": "string"
+    },
+    {
+      "key": "recomendados_total",
+      "value": "0",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Salud",
+      "description": "Verifica que el API está arriba y conectado a MySQL.",
+      "item": [
+        {
+          "name": "Salud del API y MySQL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"API ok y conectada a MySQL\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d.api).to.equal(\"ok\");",
+                  "    pm.expect(d.mysql).to.be.a(\"string\");",
+                  "    pm.expect(d.base).to.be.a(\"string\");",
+                  "    pm.expect(d.hora_servidor).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/salud",
+            "description": "Devuelve la versión de MySQL, la base y la hora del servidor (Colombia)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Productos y FEFO",
+      "description": "Búsqueda, ficha del producto y simulación FEFO de una venta.",
+      "item": [
+        {
+          "name": "Listar productos activos",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "const d = pm.response.json();",
+                  "pm.test(\"Devuelve una lista con productos\", function () {",
+                  "    pm.expect(d).to.be.an(\"array\");",
+                  "    pm.expect(d.length).to.be.above(0);",
+                  "});",
+                  "pm.test(\"Cada producto trae los campos esperados\", function () {",
+                  "    d.forEach(function (p) {",
+                  "        [\"id\", \"nombre\", \"categoria\", \"precio_venta\", \"es_granel\", \"stock\", \"stock_vencido\", \"stock_minimo\", \"stock_bajo\"].forEach(function (k) {",
+                  "            pm.expect(p).to.have.property(k);",
+                  "        });",
+                  "        pm.expect(p.es_granel).to.be.a(\"boolean\");",
+                  "    });",
+                  "});",
+                  "pm.test(\"stock_bajo es verdadero solo si stock <= stock_minimo\", function () {",
+                  "    d.forEach(function (p) { pm.expect(p.stock_bajo).to.equal(p.stock <= p.stock_minimo); });",
+                  "});",
+                  "// Guarda un producto con existencias para las siguientes pruebas.",
+                  "const conStock = d.filter(function (p) { return p.stock > 0; }).sort(function (a, b) { return b.stock - a.stock; })[0];",
+                  "if (conStock) {",
+                  "    pm.collectionVariables.set(\"producto_id\", conStock.id);",
+                  "    pm.collectionVariables.set(\"producto_stock\", conStock.stock);",
+                  "    pm.collectionVariables.set(\"categoria_en_uso_id\", conStock.categoria_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/productos",
+            "description": "Sin el parámetro q devuelve todos los productos activos con su stock vigente (suma de lotes no vencidos)."
+          }
+        },
+        {
+          "name": "Buscar productos (q=gel)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Todos los resultados coinciden con 'gel'\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.be.an(\"array\");",
+                  "    d.forEach(function (p) {",
+                  "        const texto = [p.nombre, p.marca, p.codigo_barras].join(\" \").toLowerCase();",
+                  "        pm.expect(texto).to.include(\"gel\");",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/productos?q=gel",
+            "description": "Busca por nombre, marca o código de barras (coincidencia parcial)."
+          }
+        },
+        {
+          "name": "Buscar sin resultados devuelve []",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200 y lista vacía (no null)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.be.an(\"array\");",
+                  "    pm.expect(d.length).to.equal(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/productos?q=zzzzzz",
+            "description": ""
+          }
+        },
+        {
+          "name": "Ficha del producto con lotes FEFO",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "const d = pm.response.json();",
+                  "pm.test(\"Trae ficha, etiquetas y lotes\", function () {",
+                  "    pm.expect(d).to.have.property(\"ficha\");",
+                  "    pm.expect(d.etiquetas).to.be.an(\"array\");",
+                  "    pm.expect(d.lotes).to.be.an(\"array\");",
+                  "});",
+                  "pm.test(\"Incluye el aviso de complemento (Decreto 3249 de 2006)\", function () {",
+                  "    pm.expect(d.ficha.aviso_complemento).to.be.a(\"string\");",
+                  "    pm.expect(d.ficha.aviso_complemento.length).to.be.above(0);",
+                  "});",
+                  "pm.test(\"Lotes en orden FEFO: primero el que vence primero\", function () {",
+                  "    for (let i = 1; i < d.lotes.length; i++) {",
+                  "        pm.expect(d.lotes[i - 1].fecha_vencimiento <= d.lotes[i].fecha_vencimiento).to.be.true;",
+                  "    }",
+                  "});",
+                  "pm.test(\"Solo lotes vendibles: con existencias y sin vencer\", function () {",
+                  "    d.lotes.forEach(function (l) {",
+                  "        pm.expect(l.cantidad_actual).to.be.above(0);",
+                  "        pm.expect(l.dias_restantes).to.be.at.least(0);",
+                  "        pm.expect(l.fecha_vencimiento).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "    });",
+                  "});",
+                  "pm.test(\"El stock de la ficha es la suma de los lotes vendibles\", function () {",
+                  "    const suma = d.lotes.reduce(function (s, l) { return s + l.cantidad_actual; }, 0);",
+                  "    pm.expect(d.ficha.stock).to.equal(suma);",
+                  "});",
+                  "if (d.lotes.length) { pm.collectionVariables.set(\"lote_fefo_id\", d.lotes[0].id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/productos/{{producto_id}}",
+            "description": "Ficha orientativa + etiquetas activas + lotes vendibles en orden FEFO."
+          }
+        },
+        {
+          "name": "Plan FEFO: vender 1 unidad",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Toma 1 unidad del lote que vence primero\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d.asignacion.length).to.equal(1);",
+                  "    pm.expect(d.asignacion[0].tomar).to.equal(1);",
+                  "    pm.expect(String(d.asignacion[0].lote_id)).to.equal(String(pm.collectionVariables.get(\"lote_fefo_id\")));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/productos/{{producto_id}}/plan-fefo?cantidad=1",
+            "description": "Simulación: indica de qué lotes saldría la venta. No modifica el inventario."
+          }
+        },
+        {
+          "name": "Plan FEFO: vender todo el stock",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Reparte todo el stock entre los lotes y no deja nada\", function () {",
+                  "    const d = pm.response.json();",
+                  "    const total = d.asignacion.reduce(function (s, a) { return s + a.tomar; }, 0);",
+                  "    pm.expect(total).to.equal(Number(pm.collectionVariables.get(\"producto_stock\")));",
+                  "    d.asignacion.forEach(function (a) { pm.expect(a.quedaria).to.equal(0); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/productos/{{producto_id}}/plan-fefo?cantidad={{producto_stock}}",
+            "description": ""
+          }
+        },
+        {
+          "name": "Plan FEFO: stock insuficiente → 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 409\", function () { pm.response.to.have.status(409); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/productos/{{producto_id}}/plan-fefo?cantidad=1000000",
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Categorías (crear, consultar y eliminar)",
+      "description": "Crea categorías de prueba y al final las elimina, para no dejar basura en la base.",
+      "item": [
+        {
+          "name": "Listar categorías",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Lista con id, nombre y cantidad de productos\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.be.an(\"array\");",
+                  "    d.forEach(function (c) {",
+                  "        pm.expect(c).to.have.property(\"id\");",
+                  "        pm.expect(c).to.have.property(\"nombre\");",
+                  "        pm.expect(c).to.have.property(\"cantidad_productos\");",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias",
+            "description": ""
+          }
+        },
+        {
+          "name": "Crear categoría → 201",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"nombre_prueba\", \"Prueba Postman \" + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 201\", function () { pm.response.to.have.status(201); });",
+                  "pm.test(\"Trae cabecera Location\", function () { pm.response.to.have.header(\"Location\"); });",
+                  "const d = pm.response.json();",
+                  "pm.test(\"Devuelve id y el nombre enviado\", function () {",
+                  "    pm.expect(d.id).to.be.a(\"number\");",
+                  "    pm.expect(d.nombre).to.equal(pm.collectionVariables.get(\"nombre_prueba\"));",
+                  "});",
+                  "pm.collectionVariables.set(\"cat_id\", d.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"{{nombre_prueba}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Consultar la categoría creada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Es la categoría recién creada, sin productos\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d.nombre).to.equal(pm.collectionVariables.get(\"nombre_prueba\"));",
+                  "    pm.expect(d.cantidad_productos).to.equal(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias/{{cat_id}}",
+            "description": ""
+          }
+        },
+        {
+          "name": "Crear duplicada → 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 409\", function () { pm.response.to.have.status(409); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"{{nombre_prueba}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Intento de inyección SQL → se guarda como texto",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 201: se guardó como texto literal\", function () { pm.response.to.have.status(201); });",
+                  "const d = pm.response.json();",
+                  "pm.test(\"El nombre llega intacto, sin ejecutarse\", function () {",
+                  "    pm.expect(d.nombre).to.include(\"DROP TABLE\");",
+                  "});",
+                  "pm.collectionVariables.set(\"cat_iny_id\", d.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"x'); DROP TABLE categorias; -- {{nombre_prueba}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "La tabla categorías sigue existiendo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200: la tabla no fue borrada\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().length).to.be.above(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias",
+            "description": ""
+          }
+        },
+        {
+          "name": "Eliminar categoría con productos → 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 409: las categorías con productos están protegidas\", function () { pm.response.to.have.status(409); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias/{{categoria_en_uso_id}}",
+            "description": ""
+          }
+        },
+        {
+          "name": "Eliminar la categoría de prueba → 204",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias/{{cat_id}}",
+            "description": ""
+          }
+        },
+        {
+          "name": "Eliminar la categoría de la inyección → 204",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias/{{cat_iny_id}}",
+            "description": ""
+          }
+        },
+        {
+          "name": "Consultar la categoría eliminada → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 404\", function () { pm.response.to.have.status(404); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias/{{cat_id}}",
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Etiquetas y recomendaciones",
+      "description": "Consulta por necesidad del cliente, excluyendo contraindicaciones.",
+      "item": [
+        {
+          "name": "Etiquetas de necesidad",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "const d = pm.response.json();",
+                  "pm.test(\"Todas son de tipo necesidad\", function () {",
+                  "    pm.expect(d.length).to.be.above(0);",
+                  "    d.forEach(function (e) { pm.expect(e.tipo).to.equal(\"necesidad\"); });",
+                  "});",
+                  "const mayor = d.slice().sort(function (a, b) { return b.cantidad_productos - a.cantidad_productos; })[0];",
+                  "pm.collectionVariables.set(\"necesidad_id\", mayor.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/etiquetas?tipo=necesidad",
+            "description": ""
+          }
+        },
+        {
+          "name": "Etiquetas de contraindicación",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "const d = pm.response.json();",
+                  "pm.test(\"Todas son de tipo contraindicacion\", function () {",
+                  "    d.forEach(function (e) { pm.expect(e.tipo).to.equal(\"contraindicacion\"); });",
+                  "});",
+                  "if (d.length) {",
+                  "    const mayor = d.slice().sort(function (a, b) { return b.cantidad_productos - a.cantidad_productos; })[0];",
+                  "    pm.collectionVariables.set(\"contra_id\", mayor.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/etiquetas?tipo=contraindicacion",
+            "description": ""
+          }
+        },
+        {
+          "name": "Productos de una etiqueta",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Trae la etiqueta y sus productos\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(String(d.etiqueta.id)).to.equal(String(pm.collectionVariables.get(\"necesidad_id\")));",
+                  "    pm.expect(d.productos).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/etiquetas/{{necesidad_id}}/productos",
+            "description": ""
+          }
+        },
+        {
+          "name": "Recomendaciones para una necesidad",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "const d = pm.response.json();",
+                  "pm.test(\"Incluye el aviso orientativo\", function () { pm.expect(d.aviso).to.include(\"orientativa\"); });",
+                  "pm.test(\"Sin filtros no evita nada\", function () { pm.expect(d.evitando.length).to.equal(0); });",
+                  "pm.collectionVariables.set(\"recomendados_total\", d.productos.length);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/recomendaciones?necesidad={{necesidad_id}}",
+            "description": "Productos para la necesidad, primero los que tienen existencias."
+          }
+        },
+        {
+          "name": "Recomendaciones evitando una contraindicación",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "const d = pm.response.json();",
+                  "pm.test(\"Indica qué contraindicación se evitó\", function () {",
+                  "    pm.expect(String(d.evitando[0].id)).to.equal(String(pm.collectionVariables.get(\"contra_id\")));",
+                  "});",
+                  "pm.test(\"Nunca devuelve más productos que sin el filtro\", function () {",
+                  "    pm.expect(d.productos.length).to.be.at.most(Number(pm.collectionVariables.get(\"recomendados_total\")));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/recomendaciones?necesidad={{necesidad_id}}&evitar={{contra_id}}",
+            "description": "Ejemplo: cliente embarazada o hipertenso. Se excluyen los productos con esa etiqueta."
+          }
+        },
+        {
+          "name": "Recomendaciones solo con existencias",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Todos los productos tienen stock\", function () {",
+                  "    pm.response.json().productos.forEach(function (p) { pm.expect(p.stock).to.be.above(0); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/recomendaciones?necesidad={{necesidad_id}}&disponibles=1",
+            "description": ""
+          }
+        },
+        {
+          "name": "Recomendaciones con una etiqueta que no es necesidad → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 400\", function () { pm.response.to.have.status(400); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/recomendaciones?necesidad={{contra_id}}",
+            "description": ""
+          }
+        },
+        {
+          "name": "Proveedores",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"acepta_devolucion es booleano\", function () {",
+                  "    pm.response.json().forEach(function (p) { pm.expect(p.acepta_devolucion).to.be.a(\"boolean\"); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/proveedores",
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Alertas",
+      "description": "Stock bajo y vencimientos con nivel y acción sugerida.",
+      "item": [
+        {
+          "name": "Alertas de stock bajo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Todos tienen stock <= mínimo y el faltante es correcto\", function () {",
+                  "    pm.response.json().forEach(function (p) {",
+                  "        pm.expect(p.stock).to.be.at.most(p.stock_minimo);",
+                  "        pm.expect(p.faltante_para_minimo).to.equal(Math.max(p.stock_minimo - p.stock, 0));",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/alertas/stock-bajo",
+            "description": ""
+          }
+        },
+        {
+          "name": "Alertas de vencimiento",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 200\", function () { pm.response.to.have.status(200); });",
+                  "const d = pm.response.json();",
+                  "pm.test(\"El nivel cumple la regla de negocio\", function () {",
+                  "    d.forEach(function (a) {",
+                  "        let esperado = \"devolver\";",
+                  "        if (a.dias_restantes < 0) { esperado = \"vencido\"; }",
+                  "        else if (a.dias_restantes <= a.dias_alerta_liquidacion) { esperado = \"liquidar\"; }",
+                  "        pm.expect(a.nivel).to.equal(esperado);",
+                  "    });",
+                  "});",
+                  "pm.test(\"Ordenadas por fecha de vencimiento\", function () {",
+                  "    for (let i = 1; i < d.length; i++) {",
+                  "        pm.expect(d[i - 1].fecha_vencimiento <= d[i].fecha_vencimiento).to.be.true;",
+                  "    }",
+                  "});",
+                  "pm.test(\"Traen acción sugerida y valor en riesgo\", function () {",
+                  "    d.forEach(function (a) {",
+                  "        pm.expect(a.accion_sugerida.length).to.be.above(0);",
+                  "        pm.expect(Math.abs(a.valor_en_riesgo - a.cantidad_actual * a.costo_unitario)).to.be.below(0.01);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/alertas/vencimientos",
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Casos de error",
+      "description": "El API valida las entradas y responde con el código HTTP correcto.",
+      "item": [
+        {
+          "name": "Producto inexistente → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 404\", function () { pm.response.to.have.status(404); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/productos/999999",
+            "description": ""
+          }
+        },
+        {
+          "name": "Id no numérico → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 400\", function () { pm.response.to.have.status(400); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/productos/abc",
+            "description": ""
+          }
+        },
+        {
+          "name": "POST con cuerpo vacío → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 400\", function () { pm.response.to.have.status(400); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST con nombre vacío → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 400\", function () { pm.response.to.have.status(400); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"   \"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST con más de 80 caracteres → 400",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"nombre_largo\", \"x\".repeat(81));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 400\", function () { pm.response.to.have.status(400); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"{{nombre_largo}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "POST con campo no permitido → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 400\", function () { pm.response.to.have.status(400); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Algo\",\n  \"id\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Tipo de etiqueta inválido → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 400\", function () { pm.response.to.have.status(400); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/etiquetas?tipo=xyz",
+            "description": ""
+          }
+        },
+        {
+          "name": "Plan FEFO sin cantidad → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 400\", function () { pm.response.to.have.status(400); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/productos/{{producto_id}}/plan-fefo",
+            "description": ""
+          }
+        },
+        {
+          "name": "Recomendaciones sin necesidad → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 400\", function () { pm.response.to.have.status(400); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/recomendaciones",
+            "description": ""
+          }
+        },
+        {
+          "name": "Ruta inexistente → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 404\", function () { pm.response.to.have.status(404); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/no-existe",
+            "description": ""
+          }
+        },
+        {
+          "name": "Método no soportado (PUT) → 405",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Código 405\", function () { pm.response.to.have.status(405); });",
+                  "",
+                  "pm.test(\"Error con formato {\\\"error\\\": \\\"mensaje\\\"}\", function () {",
+                  "    const d = pm.response.json();",
+                  "    pm.expect(d).to.have.property(\"error\");",
+                  "    pm.expect(d.error).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/categorias",
+            "description": ""
+          }
+        }
+      ]
+    }
+  ]
+}

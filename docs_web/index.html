@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Documentación API · La Gran Manzana</title>
+<style>
+  body { font-family: system-ui, Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 1rem; line-height: 1.5; color: #222; }
+  h1, h2 { color: #2e7d32; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { border: 1px solid #ccc; padding: .35rem .5rem; text-align: left; vertical-align: top; }
+  th { background: #eee; }
+  code, pre { background: #f3f3f3; font-size: .85rem; }
+  pre { padding: .6rem; overflow-x: auto; }
+  .tabla { overflow-x: auto; }
+  .nota { border-left: 4px solid #2e7d32; background: #f1f8f1; padding: .5rem .8rem; }
+</style>
+</head>
+<body>
+<h1>API «La Gran Manzana» — Documentación para expositores</h1>
+<p>Inventario por lotes (FEFO) y consulta/recomendación de productos. Proyecto de Calidad de Software.</p>
+
+<ul>
+  <li><b>URL base:</b> <code>http://158.158.17.188</code></li>
+  <li><b>Colección de Postman:</b> <a href="granmanzana.postman_collection.json" download>granmanzana.postman_collection.json</a> (6 carpetas, 39 peticiones con pruebas automáticas)</li>
+  <li><b>Frontend de prueba:</b> <a href="/granmanzana/">/granmanzana/</a></li>
+</ul>
+
+<h2>1. Probar en Postman paso a paso</h2>
+<ol>
+  <li>Descarga la colección con el enlace de arriba (clic derecho → <i>Guardar enlace como…</i> si el navegador la abre en vez de descargarla).</li>
+  <li>Abre Postman (de escritorio o <a href="https://web.postman.co">web</a>) → botón <b>Import</b> → arrastra el archivo <code>granmanzana.postman_collection.json</code>.</li>
+  <li>Aparece la colección <b>La Gran Manzana - API</b>. La variable <code>base_url</code> ya apunta a <code>http://158.158.17.188</code>; para cambiarla, haz clic en la colección → pestaña <b>Variables</b>.</li>
+  <li><b>Una petición a la vez:</b> abre cualquier petición (por ejemplo <i>1. Salud → Salud del API y MySQL</i>) y pulsa <b>Send</b>. Abajo verás el JSON, el código HTTP y el tiempo; en la pestaña <b>Test Results</b> aparecen las pruebas superadas.</li>
+  <li><b>Todas juntas:</b> clic derecho en la colección → <b>Run collection</b> → <b>Run La Gran Manzana - API</b>. Corre las 39 peticiones en orden y muestra cuántas pruebas pasaron.<br>
+      Hay que correrlas <b>en orden</b>, porque unas guardan datos que usan las siguientes (por ejemplo, el id de la categoría creada).</li>
+</ol>
+<p class="nota">La carpeta <b>3. Categorías</b> crea categorías de prueba y al final las <b>elimina</b>, así que la base queda igual que antes. La simulación FEFO no modifica el inventario.</p>
+
+<h3>Probar a mano (sin importar la colección)</h3>
+<ol>
+  <li>En Postman: <b>New → HTTP Request</b>.</li>
+  <li>Método <b>GET</b>, URL <code>http://158.158.17.188/api/productos?q=gel</code> → <b>Send</b>.</li>
+  <li>Para un POST: método <b>POST</b>, URL <code>http://158.158.17.188/api/categorias</code>, pestaña <b>Body → raw → JSON</b> con <code>{"nombre": "Mi categoría"}</code> → <b>Send</b>. Repítelo para ver el <b>409</b> por duplicado.</li>
+  <li>Para borrarla: método <b>DELETE</b>, URL <code>http://158.158.17.188/api/categorias/ID</code> (el id que devolvió el POST) → <b>204</b>.</li>
+</ol>
+
+<h3>Lo mismo con curl</h3>
+<pre>curl -i http://158.158.17.188/api/salud
+curl -i "http://158.158.17.188/api/productos?q=gel"
+curl -i "http://158.158.17.188/api/productos/1/plan-fefo?cantidad=40"
+curl -i "http://158.158.17.188/api/recomendaciones?necesidad=3&amp;evitar=13"
+curl -i -X POST http://158.158.17.188/api/categorias -H "Content-Type: application/json" -d "{\"nombre\":\"Mi categoria\"}"
+curl -i -X DELETE http://158.158.17.188/api/categorias/ID</pre>
+
+<h2>2. Endpoints</h2>
+<div class="tabla">
+<table>
+<tr><th>Método</th><th>Ruta</th><th>Qué hace</th><th>Códigos</th></tr>
+<tr><td>GET</td><td><code>/api/salud</code></td><td>Estado del API y de MySQL</td><td>200, 500</td></tr>
+<tr><td>GET</td><td><code>/api/productos?q=texto</code></td><td>Busca productos activos por nombre, marca o código de barras, con stock vigente, stock vencido y alerta de stock bajo</td><td>200, 400</td></tr>
+<tr><td>GET</td><td><code>/api/productos/{id}</code></td><td>Ficha orientativa + etiquetas + lotes vendibles en orden FEFO</td><td>200, 400, 404</td></tr>
+<tr><td>GET</td><td><code>/api/productos/{id}/plan-fefo?cantidad=N</code></td><td><b>Simula</b> de qué lotes saldría una venta de N unidades (el que vence primero sale primero). No modifica nada</td><td>200, 400, 404, 409 si no alcanza</td></tr>
+<tr><td>GET</td><td><code>/api/categorias</code></td><td>Lista de categorías con su número de productos</td><td>200</td></tr>
+<tr><td>GET</td><td><code>/api/categorias/{id}</code></td><td>Una categoría</td><td>200, 400, 404</td></tr>
+<tr><td>POST</td><td><code>/api/categorias</code></td><td>Crea una categoría. Cuerpo <code>{"nombre":"..."}</code> (1 a 80 caracteres)</td><td>201, 400, 409</td></tr>
+<tr><td>DELETE</td><td><code>/api/categorias/{id}</code></td><td>Elimina una categoría <b>solo si no tiene productos</b></td><td>204, 400, 404, 409</td></tr>
+<tr><td>GET</td><td><code>/api/proveedores</code></td><td>Proveedores y si aceptan devolución</td><td>200</td></tr>
+<tr><td>GET</td><td><code>/api/etiquetas?tipo=necesidad</code></td><td>Etiquetas activas (tipos: necesidad, contraindicacion, ingrediente, otro)</td><td>200, 400</td></tr>
+<tr><td>GET</td><td><code>/api/etiquetas/{id}/productos</code></td><td>Productos con esa etiqueta</td><td>200, 400, 404</td></tr>
+<tr><td>GET</td><td><code>/api/recomendaciones?necesidad=ID&amp;evitar=ID,ID&amp;disponibles=1</code></td><td>Recomienda productos para una necesidad y <b>excluye</b> los que tengan alguna contraindicación indicada (por ejemplo, embarazo o hipertensión). <code>disponibles=1</code> deja solo los que tienen existencias</td><td>200, 400, 404</td></tr>
+<tr><td>GET</td><td><code>/api/alertas/stock-bajo</code></td><td>Productos con stock vigente ≤ mínimo y cuántas unidades faltan</td><td>200</td></tr>
+<tr><td>GET</td><td><code>/api/alertas/vencimientos</code></td><td>Lotes dentro de la ventana de alerta, con nivel, acción sugerida y valor en riesgo</td><td>200</td></tr>
+</table>
+</div>
+
+<h2>3. Reglas de negocio</h2>
+<ul>
+  <li><b>Stock vigente</b> = suma de <code>cantidad_actual</code> de los lotes no vencidos. El stock no se guarda en la tabla productos.</li>
+  <li><b>FEFO</b> (First Expired, First Out): se vende primero el lote que vence primero; en empate, el de menor id.</li>
+  <li><b>Ventana de alerta</b>: lotes con existencias que vencen en los próximos <code>dias_alerta_temprana</code> días (120 por defecto).</li>
+  <li><b>Nivel</b>: <code>vencido</code> si ya venció; <code>liquidar</code> si faltan ≤ <code>dias_alerta_liquidacion</code> días (60); si no, <code>devolver</code>.</li>
+  <li><b>Acción sugerida</b>: vencido → retirar y registrar la baja; liquidar → rebaja, combo o venta destacada; devolver → devolución al distribuidor si el proveedor la acepta, si no, venta destacada.</li>
+  <li>Los productos inactivos no aparecen en ningún endpoint. La ficha siempre incluye el aviso de complemento (Decreto 3249 de 2006).</li>
+</ul>
+
+<h2>4. Formato de respuestas y errores</h2>
+<ul>
+  <li>Todo es JSON en UTF-8. Las listas vacías son <code>[]</code>, los valores faltantes son <code>null</code>, las fechas van como <code>"AAAA-MM-DD"</code>.</li>
+  <li>Los errores tienen la forma <code>{"error": "mensaje"}</code>: 400 (dato inválido), 404 (no existe), 405 (método no soportado), 409 (conflicto: duplicado, en uso o stock insuficiente), 500 (error interno, con una referencia para ubicarlo en el log).</li>
+  <li>Cada respuesta trae la cabecera <code>X-Request-Id</code>, que también queda en el log del servidor.</li>
+  <li>Seguridad: todas las consultas SQL usan parámetros, así que un intento de inyección se guarda como texto. El API se conecta a MySQL con un usuario de permisos limitados.</li>
+</ul>
+</body>
+</html>
