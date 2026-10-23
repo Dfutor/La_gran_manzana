@@ -1,0 +1,6 @@
+# Credenciales
+.env
+# Binario compilado
+/granmanzana-api
+# Configuración local de Claude Code
+.claude/settings.local.json
