@@ -55,6 +55,58 @@ func escribirError(w http.ResponseWriter, codigo int, mensaje string) {
 	escribirJSON(w, codigo, map[string]string{"error": mensaje})
 }
 
+func decodificarJSON(w http.ResponseWriter, r *http.Request, destino any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxCuerpo))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(destino); err != nil {
+		msg := "JSON inválido"
+		if errors.Is(err, io.EOF) {
+			msg = "el cuerpo está vacío"
+		} else if strings.HasPrefix(err.Error(), "json: unknown field") {
+			msg = "campo no permitido"
+		}
+		escribirError(w, http.StatusBadRequest, msg)
+		return false
+	}
+	var extra any
+	if dec.Decode(&extra) != io.EOF {
+		escribirError(w, http.StatusBadRequest, "el cuerpo debe contener un solo objeto JSON")
+		return false
+	}
+	return true
+}
+
+func nombreEntrada(s *string, requerido bool) (string, bool) {
+	if s == nil {
+		return "", !requerido
+	}
+	n, err := validarNombreCategoria(*s)
+	return n, err == ""
+}
+
+func nombreProveedor(s *string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	n := strings.TrimSpace(*s)
+	return n, n != "" && utf8.RuneCountInString(n) <= 120
+}
+
+func errorSQLCRUD(w http.ResponseWriter, r *http.Request, err error, duplicado, fk string) {
+	var me *mysql.MySQLError
+	if errors.As(err, &me) {
+		if me.Number == errMySQLDuplicado && duplicado != "" {
+			escribirError(w, http.StatusConflict, duplicado)
+			return
+		}
+		if me.Number == errMySQLFKReferencia && fk != "" {
+			escribirError(w, http.StatusConflict, fk)
+			return
+		}
+	}
+	errorInterno(w, r, err)
+}
+
 // errorInterno registra el detalle técnico y responde un 500 genérico con la
 // referencia de la petición, para poder ubicarla en el log.
 func errorInterno(w http.ResponseWriter, r *http.Request, err error) {
@@ -254,6 +306,39 @@ type etiqueta struct {
 type etiquetaConConteo struct {
 	etiqueta
 	CantidadProductos int64 `json:"cantidad_productos"`
+}
+
+type proveedorEntrada struct {
+	Nombre           *string `json:"nombre"`
+	Telefono         *string `json:"telefono"`
+	AceptaDevolucion *bool   `json:"acepta_devolucion"`
+}
+
+type productoEntrada struct {
+	CodigoBarras          *string  `json:"codigo_barras"`
+	Nombre                *string  `json:"nombre"`
+	Marca                 *string  `json:"marca"`
+	Presentacion          *string  `json:"presentacion"`
+	CategoriaID           *int64   `json:"categoria_id"`
+	ProveedorID           *int64   `json:"proveedor_id"`
+	PrecioVenta           *float64 `json:"precio_venta"`
+	MargenPorcentaje      *float64 `json:"margen_porcentaje"`
+	StockMinimo           *int64   `json:"stock_minimo"`
+	DiasAlertaTemprana    *int64   `json:"dias_alerta_temprana"`
+	DiasAlertaLiquidacion *int64   `json:"dias_alerta_liquidacion"`
+	EsGranel              *bool    `json:"es_granel"`
+	ParaQueSirve          *string  `json:"para_que_sirve"`
+	ModoToma              *string  `json:"modo_toma"`
+	Contraindicaciones    *string  `json:"contraindicaciones"`
+	Ingredientes          *string  `json:"ingredientes"`
+	AvisoComplemento      *string  `json:"aviso_complemento"`
+	Etiquetas             []int64  `json:"etiquetas"`
+}
+
+type etiquetaEntrada struct {
+	Nombre *string `json:"nombre"`
+	Tipo   *string `json:"tipo"`
+	Activa *bool   `json:"activa"`
 }
 
 type loteFEFO struct {
@@ -527,6 +612,49 @@ func (a *app) crearCategoria(w http.ResponseWriter, r *http.Request) {
 	escribirJSON(w, http.StatusCreated, categoria{ID: id, Nombre: nombre})
 }
 
+func (a *app) actualizarCategoria(w http.ResponseWriter, r *http.Request) {
+	id, ok := idDeRuta(r)
+	if !ok {
+		escribirError(w, 400, "el id debe ser un número entero positivo")
+		return
+	}
+	var in struct {
+		Nombre *string `json:"nombre"`
+	}
+	if !decodificarJSON(w, r, &in) {
+		return
+	}
+	if in.Nombre == nil {
+		escribirError(w, 400, "el nombre es obligatorio")
+		return
+	}
+	n, problema := validarNombreCategoria(*in.Nombre)
+	if problema != "" {
+		escribirError(w, 400, problema)
+		return
+	}
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	res, err := a.db.ExecContext(ctx, `UPDATE categorias SET nombre=? WHERE id=?`, n, id)
+	if err != nil {
+		errorSQLCRUD(w, r, err, "ya existe una categoría con ese nombre", "")
+		return
+	}
+	nn, _ := res.RowsAffected()
+	if nn == 0 {
+		var existe int
+		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM categorias WHERE id=?`, id).Scan(&existe); err != nil {
+			errorInterno(w, r, err)
+			return
+		}
+		if existe == 0 {
+			escribirError(w, 404, "categoría no encontrada")
+			return
+		}
+	}
+	escribirJSON(w, 200, categoria{ID: id, Nombre: n})
+}
+
 // DELETE /api/categorias/{id}
 // Solo se puede eliminar una categoría sin productos (ni activos ni inactivos);
 // así las categorías con historial quedan protegidas.
@@ -608,7 +736,276 @@ ORDER BY pr.nombre`)
 	escribirJSON(w, http.StatusOK, lista)
 }
 
+func (a *app) crearProveedor(w http.ResponseWriter, r *http.Request) {
+	var in proveedorEntrada
+	if !decodificarJSON(w, r, &in) {
+		return
+	}
+	n, ok := nombreProveedor(in.Nombre)
+	if !ok {
+		escribirError(w, 400, "el nombre es obligatorio y no puede superar 120 caracteres")
+		return
+	}
+	telefono := in.Telefono
+	dev := false
+	if in.AceptaDevolucion != nil {
+		dev = *in.AceptaDevolucion
+	}
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	res, err := a.db.ExecContext(ctx, `INSERT INTO proveedores (nombre,telefono,acepta_devolucion) VALUES (?,?,?)`, n, telefono, dev)
+	if err != nil {
+		errorSQLCRUD(w, r, err, "", "")
+		return
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/proveedores/"+strconv.FormatInt(id, 10))
+	escribirJSON(w, 201, proveedor{ID: id, Nombre: n, Telefono: telefono, AceptaDevolucion: dev})
+}
+
+func (a *app) actualizarProveedor(w http.ResponseWriter, r *http.Request) {
+	id, ok := idDeRuta(r)
+	if !ok {
+		escribirError(w, 400, "el id debe ser un número entero positivo")
+		return
+	}
+	var in proveedorEntrada
+	if !decodificarJSON(w, r, &in) {
+		return
+	}
+	n, ok := nombreProveedor(in.Nombre)
+	if !ok {
+		escribirError(w, 400, "el nombre es obligatorio y no puede superar 120 caracteres")
+		return
+	}
+	dev := false
+	if in.AceptaDevolucion != nil {
+		dev = *in.AceptaDevolucion
+	}
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	res, err := a.db.ExecContext(ctx, `UPDATE proveedores SET nombre=?,telefono=?,acepta_devolucion=? WHERE id=?`, n, in.Telefono, dev, id)
+	if err != nil {
+		errorSQLCRUD(w, r, err, "", "")
+		return
+	}
+	nn, _ := res.RowsAffected()
+	if nn == 0 {
+		var existe int
+		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM proveedores WHERE id=?`, id).Scan(&existe); err != nil {
+			errorInterno(w, r, err)
+			return
+		}
+		if existe == 0 {
+			escribirError(w, 404, "proveedor no encontrado")
+			return
+		}
+	}
+	escribirJSON(w, 200, proveedor{ID: id, Nombre: n, Telefono: in.Telefono, AceptaDevolucion: dev})
+}
+
+func (a *app) eliminarProveedor(w http.ResponseWriter, r *http.Request) {
+	id, ok := idDeRuta(r)
+	if !ok {
+		escribirError(w, 400, "el id debe ser un número entero positivo")
+		return
+	}
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	res, err := a.db.ExecContext(ctx, `DELETE FROM proveedores WHERE id=?`, id)
+	if err != nil {
+		errorSQLCRUD(w, r, err, "", "no se puede eliminar: el proveedor tiene productos asociados")
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		escribirError(w, 404, "proveedor no encontrado")
+		return
+	}
+	w.WriteHeader(204)
+}
+
 // --- Handlers: productos ---
+
+func (a *app) validarReferencias(ctx context.Context, categoriaID int64, proveedorID *int64, etiquetas []int64) error {
+	var n int
+	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM categorias WHERE id=?`, categoriaID).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("categoría no encontrada")
+	}
+	if proveedorID != nil {
+		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM proveedores WHERE id=?`, *proveedorID).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("proveedor no encontrado")
+		}
+	}
+	for _, id := range etiquetas {
+		if id <= 0 {
+			return fmt.Errorf("etiquetas contiene un id inválido")
+		}
+		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM etiquetas WHERE id=? AND activa=1`, id).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("etiqueta no encontrada o inactiva")
+		}
+	}
+	return nil
+}
+
+func (a *app) crearProducto(w http.ResponseWriter, r *http.Request) {
+	var in productoEntrada
+	if !decodificarJSON(w, r, &in) {
+		return
+	}
+	if in.Nombre == nil || strings.TrimSpace(*in.Nombre) == "" || in.CategoriaID == nil {
+		escribirError(w, 400, "nombre y categoria_id son obligatorios")
+		return
+	}
+	n := strings.TrimSpace(*in.Nombre)
+	if utf8.RuneCountInString(n) > 150 {
+		escribirError(w, 400, "el nombre no puede superar 150 caracteres")
+		return
+	}
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	if err := a.validarReferencias(ctx, *in.CategoriaID, in.ProveedorID, in.Etiquetas); err != nil {
+		if strings.Contains(err.Error(), "no encontrada") || strings.Contains(err.Error(), "inactiva") {
+			escribirError(w, 400, err.Error())
+			return
+		}
+		errorInterno(w, r, err)
+		return
+	}
+	res, err := a.db.ExecContext(ctx, `INSERT INTO productos
+(codigo_barras,nombre,marca,presentacion,categoria_id,proveedor_id,precio_venta,margen_porcentaje,stock_minimo,dias_alerta_temprana,dias_alerta_liquidacion,es_granel,para_que_sirve,modo_toma,contraindicaciones,ingredientes,aviso_complemento)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, 'Es un complemento, no un medicamento. Ante algo serio, consulte a su médico.'))`,
+		in.CodigoBarras, n, in.Marca, in.Presentacion, *in.CategoriaID, in.ProveedorID, valueFloat(in.PrecioVenta), in.MargenPorcentaje, valueInt(in.StockMinimo), valueIntDefault(in.DiasAlertaTemprana, 120), valueIntDefault(in.DiasAlertaLiquidacion, 60), valueBool(in.EsGranel), in.ParaQueSirve, in.ModoToma, in.Contraindicaciones, in.Ingredientes, in.AvisoComplemento)
+	if err != nil {
+		errorSQLCRUD(w, r, err, "ya existe un producto con ese código de barras", "")
+		return
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	for _, eid := range in.Etiquetas {
+		if _, err = a.db.ExecContext(ctx, `INSERT INTO producto_etiqueta(producto_id,etiqueta_id) VALUES (?,?)`, id, eid); err != nil {
+			errorInterno(w, r, err)
+			return
+		}
+	}
+	w.Header().Set("Location", "/api/productos/"+strconv.FormatInt(id, 10))
+	escribirJSON(w, 201, map[string]any{"id": id, "nombre": n})
+}
+
+func valueFloat(v *float64) float64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+func valueInt(v *int64) int64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+func valueIntDefault(v *int64, d int64) int64 {
+	if v == nil {
+		return d
+	}
+	return *v
+}
+func valueBool(v *bool) bool { return v != nil && *v }
+
+func (a *app) actualizarProducto(w http.ResponseWriter, r *http.Request) {
+	id, ok := idDeRuta(r)
+	if !ok {
+		escribirError(w, 400, "el id debe ser un número entero positivo")
+		return
+	}
+	var in productoEntrada
+	if !decodificarJSON(w, r, &in) {
+		return
+	}
+	if in.Nombre == nil || in.CategoriaID == nil {
+		escribirError(w, 400, "nombre y categoria_id son obligatorios")
+		return
+	}
+	n := strings.TrimSpace(*in.Nombre)
+	if n == "" || utf8.RuneCountInString(n) > 150 {
+		escribirError(w, 400, "el nombre es obligatorio y no puede superar 150 caracteres")
+		return
+	}
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	if err := a.validarReferencias(ctx, *in.CategoriaID, in.ProveedorID, in.Etiquetas); err != nil {
+		escribirError(w, 400, err.Error())
+		return
+	}
+	res, err := a.db.ExecContext(ctx, `UPDATE productos SET codigo_barras=?,nombre=?,marca=?,presentacion=?,categoria_id=?,proveedor_id=?,precio_venta=?,margen_porcentaje=?,stock_minimo=?,dias_alerta_temprana=?,dias_alerta_liquidacion=?,es_granel=?,para_que_sirve=?,modo_toma=?,contraindicaciones=?,ingredientes=?,aviso_complemento=? WHERE id=? AND activo=1`,
+		in.CodigoBarras, n, in.Marca, in.Presentacion, *in.CategoriaID, in.ProveedorID, valueFloat(in.PrecioVenta), in.MargenPorcentaje, valueInt(in.StockMinimo), valueIntDefault(in.DiasAlertaTemprana, 120), valueIntDefault(in.DiasAlertaLiquidacion, 60), valueBool(in.EsGranel), in.ParaQueSirve, in.ModoToma, in.Contraindicaciones, in.Ingredientes, in.AvisoComplemento, id)
+	if err != nil {
+		errorSQLCRUD(w, r, err, "ya existe un producto con ese código de barras", "")
+		return
+	}
+	nn, _ := res.RowsAffected()
+	if nn == 0 {
+		var existe int
+		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM productos WHERE id=? AND activo=1`, id).Scan(&existe); err != nil {
+			errorInterno(w, r, err)
+			return
+		}
+		if existe == 0 {
+			escribirError(w, 404, "producto no encontrado")
+			return
+		}
+	}
+	if in.Etiquetas != nil {
+		if _, err = a.db.ExecContext(ctx, `DELETE FROM producto_etiqueta WHERE producto_id=?`, id); err != nil {
+			errorInterno(w, r, err)
+			return
+		}
+		for _, eid := range in.Etiquetas {
+			if _, err = a.db.ExecContext(ctx, `INSERT INTO producto_etiqueta(producto_id,etiqueta_id) VALUES (?,?)`, id, eid); err != nil {
+				errorInterno(w, r, err)
+				return
+			}
+		}
+	}
+	escribirJSON(w, 200, map[string]any{"id": id, "nombre": n})
+}
+
+func (a *app) eliminarProducto(w http.ResponseWriter, r *http.Request) {
+	id, ok := idDeRuta(r)
+	if !ok {
+		escribirError(w, 400, "el id debe ser un número entero positivo")
+		return
+	}
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	res, err := a.db.ExecContext(ctx, `UPDATE productos SET activo=0 WHERE id=? AND activo=1`, id)
+	if err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		escribirError(w, 404, "producto no encontrado")
+		return
+	}
+	w.WriteHeader(204)
+}
 
 // GET /api/productos?q=texto
 func (a *app) listarProductos(w http.ResponseWriter, r *http.Request) {
@@ -783,6 +1180,114 @@ func (a *app) planFEFO(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- Handlers: etiquetas y recomendaciones ---
+
+func (a *app) crearEtiqueta(w http.ResponseWriter, r *http.Request) {
+	var in etiquetaEntrada
+	if !decodificarJSON(w, r, &in) {
+		return
+	}
+	n, ok := nombreEntrada(in.Nombre, true)
+	if !ok {
+		escribirError(w, 400, "el nombre es obligatorio y no puede superar 80 caracteres")
+		return
+	}
+	t := "necesidad"
+	if in.Tipo != nil {
+		t = strings.TrimSpace(*in.Tipo)
+	}
+	if !tiposEtiqueta[t] {
+		escribirError(w, 400, "tipo inválido")
+		return
+	}
+	act := true
+	if in.Activa != nil {
+		act = *in.Activa
+	}
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	res, err := a.db.ExecContext(ctx, `INSERT INTO etiquetas(nombre,tipo,activa) VALUES(?,?,?)`, n, t, act)
+	if err != nil {
+		errorSQLCRUD(w, r, err, "ya existe una etiqueta con ese nombre", "")
+		return
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/etiquetas/"+strconv.FormatInt(id, 10))
+	escribirJSON(w, 201, etiqueta{ID: id, Nombre: n, Tipo: t})
+}
+
+func (a *app) actualizarEtiqueta(w http.ResponseWriter, r *http.Request) {
+	id, ok := idDeRuta(r)
+	if !ok {
+		escribirError(w, 400, "el id debe ser un número entero positivo")
+		return
+	}
+	var in etiquetaEntrada
+	if !decodificarJSON(w, r, &in) {
+		return
+	}
+	n, ok := nombreEntrada(in.Nombre, true)
+	if !ok {
+		escribirError(w, 400, "el nombre es obligatorio y no puede superar 80 caracteres")
+		return
+	}
+	t := "necesidad"
+	if in.Tipo != nil {
+		t = strings.TrimSpace(*in.Tipo)
+	}
+	if !tiposEtiqueta[t] {
+		escribirError(w, 400, "tipo inválido")
+		return
+	}
+	act := true
+	if in.Activa != nil {
+		act = *in.Activa
+	}
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	res, err := a.db.ExecContext(ctx, `UPDATE etiquetas SET nombre=?,tipo=?,activa=? WHERE id=?`, n, t, act, id)
+	if err != nil {
+		errorSQLCRUD(w, r, err, "ya existe una etiqueta con ese nombre", "")
+		return
+	}
+	nn, _ := res.RowsAffected()
+	if nn == 0 {
+		var existe int
+		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM etiquetas WHERE id=?`, id).Scan(&existe); err != nil {
+			errorInterno(w, r, err)
+			return
+		}
+		if existe == 0 {
+			escribirError(w, 404, "etiqueta no encontrada")
+			return
+		}
+	}
+	escribirJSON(w, 200, etiqueta{ID: id, Nombre: n, Tipo: t})
+}
+
+func (a *app) eliminarEtiqueta(w http.ResponseWriter, r *http.Request) {
+	id, ok := idDeRuta(r)
+	if !ok {
+		escribirError(w, 400, "el id debe ser un número entero positivo")
+		return
+	}
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	res, err := a.db.ExecContext(ctx, `UPDATE etiquetas SET activa=0 WHERE id=? AND activa=1`, id)
+	if err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		escribirError(w, 404, "etiqueta no encontrada")
+		return
+	}
+	w.WriteHeader(204)
+}
 
 // GET /api/etiquetas?tipo=necesidad|contraindicacion|ingrediente|otro
 func (a *app) listarEtiquetas(w http.ResponseWriter, r *http.Request) {

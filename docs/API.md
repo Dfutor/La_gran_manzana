@@ -31,16 +31,60 @@ de la tienda naturista «La Gran Manzana» (Melgar, Tolima). Proyecto de Calidad
 | GET | `/api/categorias` | Lista de categorías con su número de productos |
 | GET | `/api/categorias/{id}` | Una categoría |
 | POST | `/api/categorias` | Crea una categoría |
+| PUT | `/api/categorias/{id}` | Reemplaza el nombre de una categoría |
 | DELETE | `/api/categorias/{id}` | Elimina una categoría **sin productos** |
 | GET | `/api/proveedores` | Proveedores y si aceptan devolución |
+| POST/PUT/DELETE | `/api/proveedores[/{id}]` | Administra proveedores (DELETE exige que no tengan productos) |
+| POST | `/api/productos` | Crea un producto activo |
+| PUT | `/api/productos/{id}` | Actualiza un producto activo y, opcionalmente, sus etiquetas |
+| DELETE | `/api/productos/{id}` | Desactiva un producto (baja lógica) |
 | GET | `/api/productos?q=texto` | Busca productos activos por nombre, marca o código de barras |
 | GET | `/api/productos/{id}` | Ficha, etiquetas y lotes FEFO de un producto |
 | GET | `/api/productos/{id}/plan-fefo?cantidad=N` | Simula de qué lotes saldría una venta (no modifica nada) |
 | GET | `/api/etiquetas?tipo=…` | Etiquetas activas (filtro opcional por tipo) |
+| POST | `/api/etiquetas` | Crea una etiqueta |
+| PUT | `/api/etiquetas/{id}` | Actualiza una etiqueta (incluida `activa`) |
+| DELETE | `/api/etiquetas/{id}` | Desactiva una etiqueta (baja lógica) |
 | GET | `/api/etiquetas/{id}/productos` | Productos de una etiqueta |
 | GET | `/api/recomendaciones?necesidad=ID&evitar=ID,ID&disponibles=1` | Recomendación por necesidad excluyendo contraindicaciones |
 | GET | `/api/alertas/stock-bajo` | Productos con stock vigente ≤ stock mínimo |
 | GET | `/api/alertas/vencimientos` | Lotes dentro de la ventana de alerta, con su nivel |
+
+---
+
+### Operaciones de escritura
+
+Todas las escrituras reciben `Content-Type: application/json`, rechazan campos
+desconocidos y devuelven `400` para cuerpos inválidos, `404` si el recurso no
+existe y `409` para duplicados o referencias que impedirían borrar. Las
+respuestas de creación son `201` con `Location`; los borrados exitosos son
+`204` sin cuerpo.
+
+```json
+{"nombre":"Proveedor Andino","telefono":"3005551234","acepta_devolucion":true}
+```
+Es el cuerpo de `POST /api/proveedores` y `PUT /api/proveedores/{id}`.
+Categorías usan únicamente `{"nombre":"..."}`. Para etiquetas:
+`{"nombre":"Digestión","tipo":"necesidad","activa":true}`; los tipos válidos
+son `necesidad`, `ingrediente`, `contraindicacion` y `otro`. Las etiquetas y
+productos se desactivan, no se eliminan físicamente, para conservar el
+historial y las claves foráneas.
+
+El cuerpo de producto requiere `nombre` y `categoria_id` y admite:
+
+```json
+{
+  "codigo_barras":"770000000001", "nombre":"Producto", "marca":"Marca",
+  "presentacion":"Caja x 30", "categoria_id":1, "proveedor_id":2,
+  "precio_venta":25000, "margen_porcentaje":30, "stock_minimo":2,
+  "dias_alerta_temprana":120, "dias_alerta_liquidacion":60, "es_granel":false,
+  "para_que_sirve":"...", "modo_toma":"...", "contraindicaciones":"...",
+  "ingredientes":"...", "aviso_complemento":"...", "etiquetas":[3,7]
+}
+```
+`etiquetas` solo puede contener IDs de etiquetas activas; `categoria_id` y
+`proveedor_id` deben referir registros existentes. En `PUT`, enviar
+`etiquetas` reemplaza las asociaciones actuales.
 
 ---
 
