@@ -1,0 +1,22 @@
+[Unit]
+Description=La Gran Manzana - API e inventario FEFO
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=makina
+Group=makina
+WorkingDirectory=/home/makina/La_gran_manzana
+ExecStart=/home/makina/La_gran_manzana/granmanzana-api
+Environment=TZ=America/Bogota
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

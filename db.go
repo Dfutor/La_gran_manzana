@@ -48,6 +48,7 @@ type config struct {
 	DBUser, DBPass, DBHost, DBName string
 	Addr                           string
 	DocsUser, DocsPass             string
+	CookieSegura                   bool
 }
 
 func leerConfig() (config, error) {
@@ -58,8 +59,9 @@ func leerConfig() (config, error) {
 		DBName: os.Getenv("DB_NAME"),
 		Addr:   os.Getenv("APP_ADDR"),
 
-		DocsUser: os.Getenv("DOCS_USER"),
-		DocsPass: os.Getenv("DOCS_PASS"),
+		DocsUser:     os.Getenv("DOCS_USER"),
+		DocsPass:     os.Getenv("DOCS_PASS"),
+		CookieSegura: os.Getenv("COOKIE_SECURE") == "true",
 	}
 	if c.DBHost == "" {
 		c.DBHost = "127.0.0.1:3306"

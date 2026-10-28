@@ -16,3 +16,8 @@ tr.bajo, .err, .vencido { color: #c62828; }
 .endpoint input { width: min(30rem, 100%); }
 .endpoint textarea { display: block; width: min(30rem, 100%); }
 pre { background: #f3f3f3; padding: .5rem; overflow: auto; max-height: 300px; }
+
+form { margin: 1rem 0; padding: .5rem; border: 1px solid #ccc; }
+label { display: inline-block; margin: .3rem; }
+textarea { vertical-align: top; }
+[hidden] { display: none !important; }

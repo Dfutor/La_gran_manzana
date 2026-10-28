@@ -3,11 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>La Gran Manzana · Prueba del API</title>
+  <title>La Gran Manzana</title>
   <link rel="stylesheet" href="estilos.css">
 </head>
 <body>
-  <h1>La Gran Manzana — prueba del API</h1>
+  <h1>La Gran Manzana</h1>
+  <form id="form-login" method="post" action="/api/login">
+    <label>Correo <input name="email" type="email" autocomplete="username" required></label>
+    <label>Contraseña <input name="password" type="password" autocomplete="current-password" required maxlength="72"></label>
+    <button>Ingresar</button><p id="login-msg" role="status"></p>
+  </form>
+  <p id="sesion" hidden><span id="sesion-nombre"></span> <button id="salir">Cerrar sesión</button></p>
+  <div id="aplicacion" hidden>
+  <p id="aviso-alertas" role="status" aria-live="polite"></p>
   <p>Estado: <span id="estado">verificando…</span></p>
 
   <nav id="pestanas">
@@ -15,7 +23,11 @@
     <button data-tab="necesidades">¿Qué necesita el cliente?</button>
     <button data-tab="alertas">Alertas</button>
     <button data-tab="categorias">Categorías</button>
-    <button data-tab="probador">Probador de API</button>
+    <button data-tab="ventas">Ventas</button>
+    <button data-tab="inventario">Lotes y bajas</button>
+    <button data-tab="administracion" data-propietario>Administración</button>
+    <button data-tab="reportes" data-propietario>Reportes</button>
+    <button data-tab="probador" data-propietario>Probador de API</button>
   </nav>
   <hr>
 
@@ -65,7 +77,7 @@
   </section>
 
   <section id="tab-categorias" class="panel" hidden>
-    <form id="form-categoria">
+    <form id="form-categoria" data-propietario>
       <input id="cat-nombre" type="text" placeholder="Nueva categoría (máx. 80)" aria-label="Nombre">
       <button type="submit">Crear</button>
     </form>
@@ -73,11 +85,81 @@
     <ul id="cat-lista"></ul>
   </section>
 
+  <section id="tab-ventas" class="panel" hidden>
+    <h2>Registrar venta</h2>
+    <p>En productos a granel una unidad representa 100 g. El sistema selecciona los lotes FEFO y excluye los vencidos.</p>
+    <form id="form-venta">
+      <label>Producto <select id="venta-producto" required></select></label>
+      <label>Cantidad <input id="venta-cantidad" type="number" min="1" max="1000000" value="1" required></label>
+      <label>Precio unitario de oferta (opcional) <input id="venta-precio" type="number" min="0" step="0.01"></label>
+      <button type="button" id="agregar-venta">Agregar al carrito</button>
+      <ul id="carrito"></ul>
+      <label>Medio de pago <select id="medio-pago"><option>efectivo</option><option>nequi</option><option>daviplata</option></select></label>
+      <button id="guardar-venta">Guardar venta</button>
+    </form>
+    <p id="venta-msg" role="status"></p>
+    <button id="historial-ventas">Consultar ventas de los últimos 30 días</button>
+    <div id="ventas-lista" class="scroll"></div>
+  </section>
+
+  <section id="tab-inventario" class="panel" hidden>
+    <h2>Ingreso de lote</h2>
+    <form id="form-lote">
+      <label>Producto <select name="producto_id" class="selector-producto" required></select></label>
+      <label>Código del lote <input name="codigo_lote" maxlength="60"></label>
+      <label>Factura <input name="numero_factura" maxlength="50"></label>
+      <label>Vencimiento <input name="fecha_vencimiento" type="date" required></label>
+      <label>Cantidad (unidades de 100 g para granel) <input name="cantidad" type="number" min="1" max="1000000" required></label>
+      <label>Costo por unidad <input name="costo_unitario" type="number" min="0" step="0.01" required></label>
+      <button>Guardar ingreso</button><p class="resultado" role="status"></p>
+    </form>
+    <h2>Consultar lotes</h2>
+    <form id="form-lotes-buscar"><label>Producto <select id="lotes-producto" class="selector-producto"></select></label><button>Consultar</button></form>
+    <div id="lotes-lista" class="scroll"></div>
+    <form id="form-editar-lote" data-propietario>
+      <h3>Corregir datos de un lote</h3>
+      <label>ID lote <input name="id" type="number" min="1" required></label>
+      <label>Código <input name="codigo_lote" maxlength="60"></label>
+      <label>Factura <input name="numero_factura" maxlength="50"></label>
+      <label>Vencimiento <input name="fecha_vencimiento" type="date" required></label>
+      <button>Actualizar lote</button><p class="resultado" role="status"></p>
+    </form>
+    <h2>Registrar baja</h2>
+    <form id="form-baja">
+      <label>ID lote <input name="lote_id" type="number" min="1" required></label>
+      <label>Cantidad <input name="cantidad" type="number" min="1" max="1000000" required></label>
+      <label>Motivo <select name="motivo"><option>vencimiento</option><option>deterioro</option><option>obsequio</option><option>devolucion</option><option>otro</option></select></label>
+      <label>Acción previa <select name="accion_previa"><option>ninguna</option><option>venta_destacada</option><option>rebaja</option><option>combo</option><option>devolucion_distribuidor</option><option>obsequio</option></select></label>
+      <button>Guardar baja</button><p class="resultado" role="status"></p>
+    </form>
+    <button id="historial-bajas">Consultar bajas de los últimos 30 días</button><div id="bajas-lista" class="scroll"></div>
+  </section>
+
+  <section id="tab-administracion" class="panel" hidden>
+    <h2>Catálogo y usuarios</h2>
+    <p>Para editar, consulta el registro y completa sus datos. Eliminar un producto lo desactiva y conserva el historial.</p>
+    <div id="formularios-admin"></div>
+  </section>
+
+  <section id="tab-reportes" class="panel" hidden>
+    <h2>Reportes</h2>
+    <form id="form-reporte">
+      <label>Desde <input name="desde" type="date" required></label>
+      <label>Hasta <input name="hasta" type="date" required></label>
+      <label>Reporte <select name="tipo"><option value="ventas">Ventas por día y pago</option><option value="ventas?agrupar=producto">Productos más vendidos</option><option value="perdidas">Pérdidas y acciones previas</option><option value="rotacion">Rotación y reposición</option></select></label>
+      <button>Consultar</button>
+    </form>
+    <p>Reposición: estimación de 30 días según las ventas del periodo y el stock vigente actual. Sin movimiento significa que no hubo ventas en el periodo.</p>
+    <div id="reporte-lista" class="scroll"></div>
+  </section>
+
   <section id="tab-probador" class="panel" hidden>
     <p><small>Edita la ruta o el cuerpo y pulsa Enviar.</small></p>
     <div id="probador-lista"></div>
   </section>
 
+  </div>
   <script src="app.js"></script>
+  <script src="operacion.js"></script>
 </body>
 </html>

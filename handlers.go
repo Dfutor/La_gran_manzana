@@ -19,9 +19,11 @@ import (
 )
 
 type app struct {
-	db          *sql.DB
-	docsUsuario string
-	docsClave   string
+	db           *sql.DB
+	docsUsuario  string
+	docsClave    string
+	auth         *autenticacion
+	cookieSegura bool
 }
 
 const (
@@ -287,6 +289,7 @@ type proveedor struct {
 
 type fichaProducto struct {
 	productoResumen
+	MargenPorcentaje      *float64   `json:"margen_porcentaje"`
 	DiasAlertaTemprana    int64      `json:"dias_alerta_temprana"`
 	DiasAlertaLiquidacion int64      `json:"dias_alerta_liquidacion"`
 	ParaQueSirve          *string    `json:"para_que_sirve"`
@@ -304,6 +307,7 @@ type etiqueta struct {
 }
 
 type etiquetaConConteo struct {
+	Activa bool `json:"activa"`
 	etiqueta
 	CantidadProductos int64 `json:"cantidad_productos"`
 }
@@ -870,6 +874,10 @@ func (a *app) crearProducto(w http.ResponseWriter, r *http.Request) {
 		escribirError(w, 400, "nombre y categoria_id son obligatorios")
 		return
 	}
+	if err := validarProducto(in); err != nil {
+		escribirError(w, 400, err.Error())
+		return
+	}
 	n := strings.TrimSpace(*in.Nombre)
 	if utf8.RuneCountInString(n) > 150 {
 		escribirError(w, 400, "el nombre no puede superar 150 caracteres")
@@ -885,7 +893,13 @@ func (a *app) crearProducto(w http.ResponseWriter, r *http.Request) {
 		errorInterno(w, r, err)
 		return
 	}
-	res, err := a.db.ExecContext(ctx, `INSERT INTO productos
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `INSERT INTO productos
 (codigo_barras,nombre,marca,presentacion,categoria_id,proveedor_id,precio_venta,margen_porcentaje,stock_minimo,dias_alerta_temprana,dias_alerta_liquidacion,es_granel,para_que_sirve,modo_toma,contraindicaciones,ingredientes,aviso_complemento)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, 'Es un complemento, no un medicamento. Ante algo serio, consulte a su médico.'))`,
 		in.CodigoBarras, n, in.Marca, in.Presentacion, *in.CategoriaID, in.ProveedorID, valueFloat(in.PrecioVenta), in.MargenPorcentaje, valueInt(in.StockMinimo), valueIntDefault(in.DiasAlertaTemprana, 120), valueIntDefault(in.DiasAlertaLiquidacion, 60), valueBool(in.EsGranel), in.ParaQueSirve, in.ModoToma, in.Contraindicaciones, in.Ingredientes, in.AvisoComplemento)
@@ -899,10 +913,14 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, 'Es un complemento, no un me
 		return
 	}
 	for _, eid := range in.Etiquetas {
-		if _, err = a.db.ExecContext(ctx, `INSERT INTO producto_etiqueta(producto_id,etiqueta_id) VALUES (?,?)`, id, eid); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO producto_etiqueta(producto_id,etiqueta_id) VALUES (?,?)`, id, eid); err != nil {
 			errorInterno(w, r, err)
 			return
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		errorInterno(w, r, err)
+		return
 	}
 	w.Header().Set("Location", "/api/productos/"+strconv.FormatInt(id, 10))
 	escribirJSON(w, 201, map[string]any{"id": id, "nombre": n})
@@ -942,6 +960,10 @@ func (a *app) actualizarProducto(w http.ResponseWriter, r *http.Request) {
 		escribirError(w, 400, "nombre y categoria_id son obligatorios")
 		return
 	}
+	if err := validarProducto(in); err != nil {
+		escribirError(w, 400, err.Error())
+		return
+	}
 	n := strings.TrimSpace(*in.Nombre)
 	if n == "" || utf8.RuneCountInString(n) > 150 {
 		escribirError(w, 400, "el nombre es obligatorio y no puede superar 150 caracteres")
@@ -953,7 +975,13 @@ func (a *app) actualizarProducto(w http.ResponseWriter, r *http.Request) {
 		escribirError(w, 400, err.Error())
 		return
 	}
-	res, err := a.db.ExecContext(ctx, `UPDATE productos SET codigo_barras=?,nombre=?,marca=?,presentacion=?,categoria_id=?,proveedor_id=?,precio_venta=?,margen_porcentaje=?,stock_minimo=?,dias_alerta_temprana=?,dias_alerta_liquidacion=?,es_granel=?,para_que_sirve=?,modo_toma=?,contraindicaciones=?,ingredientes=?,aviso_complemento=? WHERE id=? AND activo=1`,
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `UPDATE productos SET codigo_barras=?,nombre=?,marca=?,presentacion=?,categoria_id=?,proveedor_id=?,precio_venta=?,margen_porcentaje=?,stock_minimo=?,dias_alerta_temprana=?,dias_alerta_liquidacion=?,es_granel=?,para_que_sirve=?,modo_toma=?,contraindicaciones=?,ingredientes=?,aviso_complemento=COALESCE(?, 'Es un complemento, no un medicamento. Ante algo serio, consulte a su médico.') WHERE id=? AND activo=1`,
 		in.CodigoBarras, n, in.Marca, in.Presentacion, *in.CategoriaID, in.ProveedorID, valueFloat(in.PrecioVenta), in.MargenPorcentaje, valueInt(in.StockMinimo), valueIntDefault(in.DiasAlertaTemprana, 120), valueIntDefault(in.DiasAlertaLiquidacion, 60), valueBool(in.EsGranel), in.ParaQueSirve, in.ModoToma, in.Contraindicaciones, in.Ingredientes, in.AvisoComplemento, id)
 	if err != nil {
 		errorSQLCRUD(w, r, err, "ya existe un producto con ese código de barras", "")
@@ -962,7 +990,7 @@ func (a *app) actualizarProducto(w http.ResponseWriter, r *http.Request) {
 	nn, _ := res.RowsAffected()
 	if nn == 0 {
 		var existe int
-		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM productos WHERE id=? AND activo=1`, id).Scan(&existe); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM productos WHERE id=? AND activo=1`, id).Scan(&existe); err != nil {
 			errorInterno(w, r, err)
 			return
 		}
@@ -972,16 +1000,20 @@ func (a *app) actualizarProducto(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if in.Etiquetas != nil {
-		if _, err = a.db.ExecContext(ctx, `DELETE FROM producto_etiqueta WHERE producto_id=?`, id); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM producto_etiqueta WHERE producto_id=?`, id); err != nil {
 			errorInterno(w, r, err)
 			return
 		}
 		for _, eid := range in.Etiquetas {
-			if _, err = a.db.ExecContext(ctx, `INSERT INTO producto_etiqueta(producto_id,etiqueta_id) VALUES (?,?)`, id, eid); err != nil {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO producto_etiqueta(producto_id,etiqueta_id) VALUES (?,?)`, id, eid); err != nil {
 				errorInterno(w, r, err)
 				return
 			}
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		errorInterno(w, r, err)
+		return
 	}
 	escribirJSON(w, 200, map[string]any{"id": id, "nombre": n})
 }
@@ -1054,7 +1086,7 @@ SELECT p.id, p.codigo_barras, p.nombre, p.marca, p.presentacion,
        c.id, c.nombre, p.precio_venta, p.es_granel, p.stock_minimo,
        `+stockVigente+` AS stock,
        `+stockVencido+` AS stock_vencido,
-       p.dias_alerta_temprana, p.dias_alerta_liquidacion,
+       p.dias_alerta_temprana, p.dias_alerta_liquidacion, p.margen_porcentaje,
        p.para_que_sirve, p.modo_toma, p.contraindicaciones, p.ingredientes, p.aviso_complemento,
        pr.id, pr.nombre, pr.telefono, pr.acepta_devolucion
 FROM productos p
@@ -1066,7 +1098,7 @@ GROUP BY p.id, c.id, c.nombre, pr.id, pr.nombre, pr.telefono, pr.acepta_devoluci
 		&f.ID, &f.CodigoBarras, &f.Nombre, &f.Marca, &f.Presentacion,
 		&f.CategoriaID, &f.Categoria, &f.PrecioVenta, &f.EsGranel, &f.StockMinimo,
 		&f.Stock, &f.StockVencido,
-		&f.DiasAlertaTemprana, &f.DiasAlertaLiquidacion,
+		&f.DiasAlertaTemprana, &f.DiasAlertaLiquidacion, &f.MargenPorcentaje,
 		&f.ParaQueSirve, &f.ModoToma, &f.Contraindicaciones, &f.Ingredientes, &f.AvisoComplemento,
 		&provID, &provNombre, &provTel, &provDevol)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1318,6 +1350,7 @@ ORDER BY e.tipo, e.nombre`, tipo, tipo)
 			errorInterno(w, r, err)
 			return
 		}
+		e.Activa = true // La consulta solo devuelve etiquetas activas.
 		lista = append(lista, e)
 	}
 	if err := rows.Err(); err != nil {

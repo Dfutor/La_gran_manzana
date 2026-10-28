@@ -12,12 +12,18 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+var clientesIntegracion sync.Map
 
 func appIntegracion(t *testing.T) (*app, *httptest.Server) {
 	t.Helper()
@@ -31,6 +37,9 @@ func appIntegracion(t *testing.T) (*app, *httptest.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.HasPrefix(cfg.DBName, "granmanzana_test") {
+		t.Fatal("integración requiere DB_NAME con prefijo granmanzana_test en una base desechable")
+	}
 	db, err := abrirDB(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +51,32 @@ func appIntegracion(t *testing.T) (*app, *httptest.Server) {
 	}
 	a := &app{db: db}
 	srv := httptest.NewServer(a.rutas())
-	t.Cleanup(func() { srv.Close(); db.Close() })
+	hash, err := bcrypt.GenerateFromPassword([]byte("ClavePruebas123!"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := fmt.Sprintf("prueba%d@example.test", time.Now().UnixNano())
+	res, err := db.Exec(`INSERT INTO usuarios(nombre,email,password_hash,rol) VALUES('Prueba',?,?,'propietario')`, email, string(hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid, _ := res.LastInsertId()
+	cuerpo, _ := json.Marshal(map[string]string{"email": email, "password": "ClavePruebas123!"})
+	resp, err := http.Post(srv.URL+"/api/login", "application/json", bytes.NewReader(cuerpo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 || len(resp.Cookies()) == 0 {
+		t.Fatal("login integración", resp.StatusCode)
+	}
+	clientesIntegracion.Store(srv.URL, resp.Cookies()[0])
+	t.Cleanup(func() {
+		clientesIntegracion.Delete(srv.URL)
+		srv.Close()
+		db.Exec(`DELETE FROM usuarios WHERE id=?`, uid)
+		db.Close()
+	})
 	return a, srv
 }
 
@@ -59,6 +93,10 @@ func pedir(t *testing.T, metodo, url string, cuerpo string, destino any) int {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	destinoURL, _ := neturl.Parse(url)
+	if c, ok := clientesIntegracion.Load(destinoURL.Scheme + "://" + destinoURL.Host); ok {
+		req.AddCookie(c.(*http.Cookie))
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

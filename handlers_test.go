@@ -84,7 +84,7 @@ func TestEscaparLike(t *testing.T) {
 
 // Estas pruebas no tocan la base: las validaciones responden antes de consultarla.
 func TestRutasSinBaseDeDatos(t *testing.T) {
-	h := (&app{}).rutas()
+	h := conRecuperacion(conLog(conCORS((&app{}).enrutador())))
 	casos := []struct {
 		nombre, metodo, ruta, cuerpo string
 		codigo                       int

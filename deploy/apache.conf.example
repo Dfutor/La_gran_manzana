@@ -1,0 +1,7 @@
+# Dentro del VirtualHost EXISTENTE. Mantener su DocumentRoot y la configuración PHP.
+# Requiere mod_proxy y mod_proxy_http. Con HTTPS, COOKIE_SECURE=true en .env.
+ProxyPreserveHost On
+ProxyPass /api/ http://127.0.0.1:8080/api/
+ProxyPassReverse /api/ http://127.0.0.1:8080/api/
+ProxyPass /granmanzana/ http://127.0.0.1:8080/granmanzana/
+ProxyPassReverse /granmanzana/ http://127.0.0.1:8080/granmanzana/

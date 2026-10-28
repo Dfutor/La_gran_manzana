@@ -9,8 +9,54 @@ de la tienda naturista «La Gran Manzana» (Melgar, Tolima). Proyecto de Calidad
 | **Frontend de prueba** | `http://158.158.17.188/granmanzana/` (básico, con *Probador de API*) |
 | **Documentación privada + colección Postman** | `http://158.158.17.188/granmanzana/docs/` (usuario y contraseña) |
 | **Formato** | JSON en UTF-8 |
-| **Autenticación** | Ninguna por ahora (versión de prueba) |
+| **Autenticación** | Sesión con cookie HttpOnly después de `POST /api/login`; escrituras de catálogo, usuarios y reportes reservados al propietario. |
 | **CORS** | `Access-Control-Allow-Origin: *` |
+
+## Login y permisos
+
+`POST /api/login` recibe `{"email":"correo@tienda.com","password":"contraseña"}` y devuelve los datos públicos del usuario; guarda una cookie de sesión de ocho horas. `GET /api/sesion` consulta el acceso actual; `POST /api/logout` lo revoca. Reiniciar cierra todas las sesiones. Contraseñas almacenadas con bcrypt; los hashes de marcador no permiten ingresar. El primer acceso se configura por consola según README.
+
+Ejemplo para curl, con un archivo temporal que contenga el JSON del login (permisos 600, eliminar después):
+
+```bash
+curl -c cookies.txt -H 'Content-Type: application/json' --data-binary @login.json http://127.0.0.1:8080/api/login
+curl -b cookies.txt http://127.0.0.1:8080/api/productos
+curl -b cookies.txt -X POST http://127.0.0.1:8080/api/logout
+```
+
+Añadir `-b cookies.txt` a los ejemplos siguientes. `401`: falta sesión/está revocada; `403`: falta rol o Origin no permitido; `429`: límite de login. Empleado y propietario consultan catálogo/alertas/historial y registran ventas, lotes y bajas. Solo propietario modifica catálogo, corrige lotes, administra usuarios y consulta reportes. Las cookies se usan en el mismo origen; CORS no habilita sesiones entre sitios.
+
+## Movimientos, usuarios y reportes
+
+| Método/ruta | Entrada y resultado |
+|---|---|
+| `GET/POST /api/usuarios`, `PUT /api/usuarios/{id}` | `{nombre,email,password,rol,estado}`; rol propietario/empleado, estado activo/inactivo. Password obligatorio al crear, opcional al editar, 12–72 bytes. GET omite hashes. |
+| `GET /api/lotes?producto_id=ID` | Todos los lotes, incluidos vencidos/agotados, en orden de vencimiento/ID. |
+| `POST /api/lotes` | `{producto_id,codigo_lote?,numero_factura?,fecha_vencimiento,cantidad,costo_unitario}`; cantidad positiva, fecha vigente y costo con hasta dos decimales. 201 con ID/cantidad actual. |
+| `PUT /api/lotes/{id}` | `{codigo_lote?,numero_factura?,fecha_vencimiento}`; no modifica cantidades ni costos históricos. |
+| `POST /api/ventas` | `{medio_pago,detalles:[{producto_id,cantidad,precio_unitario?}]}`; hasta 100 productos únicos; cantidades 1..1000000. Precio opcional de oferta; si se omite usa catálogo. Total calculado por servidor en centavos exactos. |
+| `GET /api/ventas`, `GET /api/ventas/{id}` | Encabezados paginados y detalle con precio histórico. La distribución FEFO se devuelve al crear la venta; no se persiste porque el esquema actual no contiene venta-lote. |
+| `POST /api/bajas` | `{lote_id,cantidad,motivo,accion_previa?}`; producto/costo/usuario derivados del lote y sesión. Acción por defecto ninguna. 201 con ID/valor perdido/stock restante. |
+| `GET /api/bajas` | Historial de salidas con motivo/acción/costo/usuario. |
+| `GET /api/reportes/ventas?agrupar=dia` | Ventas/total por día y medio de pago. `agrupar=producto`: ranking de unidades y total vendido. |
+| `GET /api/reportes/perdidas` | Unidades y valor de bajas por motivo y acción previa. |
+| `GET /api/reportes/rotacion` | Stock actual, unidades/total del periodo, promedio diario, días de cobertura, sugerencia de compra a 30 días y estado sin_movimiento/reponer/con_movimiento. |
+
+Historial y reportes admiten `desde`/`hasta` (inclusivos, AAAA-MM-DD, últimos 30 días por defecto; máximo 367 días). Lotes/ventas/bajas admiten `limite` (1..500, predeterminado 100) y `offset` (>=0). Las estimaciones de rotación combinan ventas del periodo con stock vigente actual; no calculan rotación contable sobre inventario promedio histórico. Importes nuevos aceptan JSON numérico o texto decimal, nunca negativos ni más de dos decimales. Granel: unidades enteras de 100 g.
+
+Venta de ejemplo:
+
+```json
+{"medio_pago":"nequi","detalles":[{"producto_id":1,"cantidad":3}]}
+```
+
+Baja de ejemplo:
+
+```json
+{"lote_id":1,"cantidad":1,"motivo":"deterioro","accion_previa":"rebaja"}
+```
+
+Motivos: vencimiento/deterioro/obsequio/devolucion/otro. Acciones: ninguna/venta_destacada/rebaja/combo/devolucion_distribuidor/obsequio. Una baja por vencimiento exige lote ya vencido. Ventas y bajas descuentan lotes en transacciones con bloqueo: stock insuficiente devuelve 409 y revierte todos los cambios.
 
 ## Convenciones
 
@@ -20,7 +66,7 @@ de la tienda naturista «La Gran Manzana» (Melgar, Tolima). Proyecto de Calidad
 - Los indicadores (`es_granel`, `acepta_devolucion`, …) van como `true`/`false`.
 - **Stock vigente** = suma de `cantidad_actual` de los lotes **no vencidos** del producto.
 - **FEFO** (*First Expired, First Out*): los lotes con existencias y sin vencer se ordenan por fecha de vencimiento; se vende primero el que vence primero.
-- Los productos inactivos (`activo = 0`) no aparecen en ningún endpoint.
+- El catálogo y las recomendaciones ocultan productos inactivos; el historial conserva sus movimientos.
 - La ficha del producto es orientativa (Decreto 3249 de 2006) y siempre incluye `aviso_complemento`.
 
 ## Endpoints
@@ -364,7 +410,7 @@ Todos los errores tienen la forma `{"error": "mensaje"}`. Cada respuesta trae la
 
 ## Pruebas con Postman
 
-La colección `granmanzana.postman_collection.json` (6 carpetas, 39 peticiones y 161 pruebas automáticas) se descarga desde la
+La colección `granmanzana.postman_collection.json` (incluye login con variables email/password) se descarga desde la
 documentación privada. Se importa en Postman y se ejecuta con **Run collection**, en orden. Crea sus propias categorías de prueba
 y las elimina al final.
 

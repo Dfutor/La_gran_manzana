@@ -37,6 +37,7 @@ async function api(ruta, opciones = {}) {
   try {
     const resp = await fetch(ruta, { ...opciones, headers: { Accept: 'application/json', ...(opciones.headers || {}) } });
     const crudo = await resp.text();
+    if (resp.status === 401 && ruta !== '/api/login') mostrarSesion(null);
     let data = null;
     try { data = crudo ? JSON.parse(crudo) : null; } catch { data = null; }
     return { ok: resp.ok, status: resp.status, data, crudo, ms: Math.round(performance.now() - inicio) };
@@ -79,9 +80,14 @@ const cargadores = {
   alertas: cargarAlertas,
   categorias: () => cargarCategorias(),
   probador: armarProbador,
+  ventas: () => cargarSelectores(),
+  inventario: () => cargarSelectores(),
+  administracion: () => armarAdministracion(),
+  reportes: () => prepararReportes(),
 };
 
 function activarPestana(nombre) {
+  if (['reportes', 'administracion', 'probador'].includes(nombre) && usuarioSesion?.rol !== 'propietario') nombre = 'productos';
   document.querySelectorAll('#pestanas button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === nombre)));
   document.querySelectorAll('.panel').forEach((p) => { p.hidden = p.id !== 'tab-' + nombre; });
   if (!cargadas[nombre]) {
@@ -107,7 +113,7 @@ async function buscarProductos(q) {
     onclick: () => verFicha(p.id),
     onkeydown: (e) => { if (e.key === 'Enter') verFicha(p.id); },
   },
-  h('td', {}, p.nombre, p.es_granel ? ' (granel)' : ''),
+  h('td', {}, `#${p.id} `, p.nombre, p.es_granel ? ' (granel)' : ''),
   h('td', {}, texto(p.marca)),
   h('td', {}, texto(p.presentacion)),
   h('td', {}, p.categoria),
@@ -345,8 +351,5 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('#pestanas button').forEach((b) => b.addEventListener('click', () => activarPestana(b.dataset.tab)));
   $('#form-buscar').addEventListener('submit', (e) => { e.preventDefault(); buscarProductos($('#q').value.trim()); });
   $('#form-categoria').addEventListener('submit', crearCategoria);
-  verificarSalud();
-  setInterval(verificarSalud, 30000);
-  const inicial = location.hash.slice(1);
-  activarPestana(cargadores[inicial] ? inicial : 'productos');
+  iniciarOperacion();
 });

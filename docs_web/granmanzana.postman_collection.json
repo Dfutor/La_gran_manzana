@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "La Gran Manzana - API",
-    "description": "Pruebas del API de inventario por lotes (FEFO) y recomendación de productos de la tienda naturista «La Gran Manzana». Importe la colección y ejecútela completa con Run collection: cada petición trae pruebas automáticas. Cambie la variable base_url si el servidor tiene otra dirección.",
+    "description": "Pruebas del API de inventario por lotes (FEFO) y recomendación de productos de la tienda naturista «La Gran Manzana». Importe la colección y ejecútela completa con Run collection: cada petición trae pruebas automáticas. Cambie la variable base_url si el servidor tiene otra dirección. Configure email/password del propietario antes de ejecutar; el login inicial guarda la cookie automáticamente en Postman. No guardar contraseñas reales en la colección exportada.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -82,9 +82,62 @@
       "key": "recomendados_total",
       "value": "0",
       "type": "string"
+    },
+    {
+      "key": "email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
+    {
+      "name": "0. Acceso",
+      "item": [
+        {
+          "name": "Login propietario",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "login"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Login correcto\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code !== 200) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
     {
       "name": "1. Salud",
       "description": "Verifica que el API está arriba y conectado a MySQL.",

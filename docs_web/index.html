@@ -23,7 +23,7 @@
 
 <ul>
   <li><b>URL base:</b> <code>http://158.158.17.188</code></li>
-  <li><b>Colección de Postman:</b> <a href="granmanzana.postman_collection.json" download>granmanzana.postman_collection.json</a> (6 carpetas, 39 peticiones con pruebas automáticas)</li>
+  <li><b>Colección de Postman:</b> <a href="granmanzana.postman_collection.json" download>granmanzana.postman_collection.json</a> (incluye login y peticiones con pruebas automáticas)</li>
   <li><b>Frontend de prueba:</b> <a href="/granmanzana/">/granmanzana/</a></li>
 </ul>
 
@@ -33,9 +33,10 @@
   <li>Abre Postman (de escritorio o <a href="https://web.postman.co">web</a>) → botón <b>Import</b> → arrastra el archivo <code>granmanzana.postman_collection.json</code>.</li>
   <li>Aparece la colección <b>La Gran Manzana - API</b>. La variable <code>base_url</code> ya apunta a <code>http://158.158.17.188</code>; para cambiarla, haz clic en la colección → pestaña <b>Variables</b>.</li>
   <li><b>Una petición a la vez:</b> abre cualquier petición (por ejemplo <i>1. Salud → Salud del API y MySQL</i>) y pulsa <b>Send</b>. Abajo verás el JSON, el código HTTP y el tiempo; en la pestaña <b>Test Results</b> aparecen las pruebas superadas.</li>
-  <li><b>Todas juntas:</b> clic derecho en la colección → <b>Run collection</b> → <b>Run La Gran Manzana - API</b>. Corre las 39 peticiones en orden y muestra cuántas pruebas pasaron.<br>
+  <li><b>Todas juntas:</b> clic derecho en la colección → <b>Run collection</b> → <b>Run La Gran Manzana - API</b>. Corre las peticiones en orden y muestra cuántas pruebas pasaron.<br>
       Hay que correrlas <b>en orden</b>, porque unas guardan datos que usan las siguientes (por ejemplo, el id de la categoría creada).</li>
 </ol>
+<p>Antes de ejecutar la colección, configura las variables <code>email</code> y <code>password</code> de un propietario real. El login inicial guarda una cookie automáticamente; no exportes claves reales. Las credenciales Basic de esta documentación son independientes.</p>
 <p class="nota">La carpeta <b>3. Categorías</b> crea categorías de prueba y al final las <b>elimina</b>, así que la base queda igual que antes. La simulación FEFO no modifica el inventario.</p>
 
 <h3>Probar a mano (sin importar la colección)</h3>

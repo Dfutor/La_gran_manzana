@@ -11,6 +11,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"io/fs"
 	"log"
 	"net/http"
@@ -32,6 +33,9 @@ var docsFS embed.FS
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	crearPropietario := flag.String("crear-propietario", "", "crear el primer propietario; contraseña por stdin")
+	restablecer := flag.String("restablecer-clave", "", "restablecer contraseña por email; contraseña por stdin")
+	flag.Parse()
 
 	if err := cargarEnv(".env"); err != nil {
 		log.Fatalf("no se pudo leer .env: %v", err)
@@ -55,7 +59,16 @@ func main() {
 	}
 	log.Printf("conectado a MySQL %s, base %s", cfg.DBHost, cfg.DBName)
 
-	a := &app{db: db, docsUsuario: cfg.DocsUser, docsClave: cfg.DocsPass}
+	if *crearPropietario != "" || *restablecer != "" {
+		if err := configurarAcceso(db, *crearPropietario, *restablecer); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	a := &app{db: db, docsUsuario: cfg.DocsUser, docsClave: cfg.DocsPass, cookieSegura: cfg.CookieSegura}
+	alertasCtx, detenerAlertas := context.WithCancel(context.Background())
+	defer detenerAlertas()
+	go a.vigilarAlertas(alertasCtx)
 	if cfg.DocsUser == "" || cfg.DocsPass == "" {
 		log.Printf("aviso: DOCS_USER/DOCS_PASS vacíos; la documentación privada queda deshabilitada")
 	}
@@ -93,9 +106,33 @@ func main() {
 
 // rutas arma el enrutador con todos los endpoints, el frontend y los middlewares.
 func (a *app) rutas() http.Handler {
+	if a.auth == nil {
+		a.auth = nuevaAutenticacion()
+	}
+	return conRecuperacion(conLog(conCORS(a.protegerAPI(a.enrutador()))))
+}
+
+func (a *app) enrutador() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/salud", a.salud)
+	mux.HandleFunc("POST /api/login", a.login)
+	mux.HandleFunc("POST /api/logout", a.logout)
+	mux.HandleFunc("GET /api/sesion", a.sesionActual)
+	mux.HandleFunc("GET /api/usuarios", a.listarUsuarios)
+	mux.HandleFunc("POST /api/usuarios", a.crearUsuario)
+	mux.HandleFunc("PUT /api/usuarios/{id}", a.actualizarUsuario)
+	mux.HandleFunc("GET /api/lotes", a.listarLotes)
+	mux.HandleFunc("POST /api/lotes", a.crearLote)
+	mux.HandleFunc("PUT /api/lotes/{id}", a.actualizarLote)
+	mux.HandleFunc("GET /api/ventas", a.listarVentas)
+	mux.HandleFunc("GET /api/ventas/{id}", a.detalleVenta)
+	mux.HandleFunc("POST /api/ventas", a.crearVenta)
+	mux.HandleFunc("GET /api/bajas", a.listarBajas)
+	mux.HandleFunc("POST /api/bajas", a.crearBaja)
+	mux.HandleFunc("GET /api/reportes/ventas", a.reporteVentas)
+	mux.HandleFunc("GET /api/reportes/perdidas", a.reportePerdidas)
+	mux.HandleFunc("GET /api/reportes/rotacion", a.reporteRotacion)
 	mux.HandleFunc("GET /api/categorias", a.listarCategorias)
 	mux.HandleFunc("POST /api/categorias", a.crearCategoria)
 	mux.HandleFunc("PUT /api/categorias/{id}", a.actualizarCategoria)
@@ -154,7 +191,7 @@ func (a *app) rutas() http.Handler {
 		http.Redirect(w, r, "/granmanzana/", http.StatusFound)
 	})
 
-	return conRecuperacion(conLog(conCORS(mux)))
+	return mux
 }
 
 // --- Middlewares ---
@@ -197,7 +234,7 @@ func conLog(next http.Handler) http.Handler {
 		r = r.WithContext(context.WithValue(r.Context(), claveCtx{}, id))
 		rec := &registroEstado{ResponseWriter: w, codigo: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		log.Printf("[%s] %s %s %d %s", id, r.Method, r.URL.RequestURI(), rec.codigo, time.Since(inicio).Round(time.Microsecond))
+		log.Printf("[%s] %s %s %d %s", id, r.Method, r.URL.EscapedPath(), rec.codigo, time.Since(inicio).Round(time.Microsecond))
 	})
 }
 
