@@ -1,0 +1,412 @@
+openapi: 3.0.3
+
+info:
+  title: La Gran Manzana API
+  description: API REST de inventario por lotes FEFO y recomendaciones.
+  version: 1.0.0
+
+servers:
+  - url: /
+    description: Servidor actual
+
+tags:
+  - name: Autenticación
+  - name: Salud
+  - name: Catálogo
+  - name: Inventario
+  - name: Ventas
+  - name: Reportes
+
+paths:
+  /api/login:
+    post:
+      tags: [Autenticación]
+      summary: Inicia sesión
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, example: usuario@tienda.com }
+                password: { type: string, format: password, example: contraseña }
+      responses:
+        '200':
+          description: Sesión iniciada; el servidor entrega una cookie HttpOnly.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usuario' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /api/logout:
+    post:
+      tags: [Autenticación]
+      summary: Cierra la sesión actual
+      responses:
+        '204': { description: Sesión cerrada }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /api/sesion:
+    get:
+      tags: [Autenticación]
+      summary: Consulta la sesión actual
+      responses:
+        '200':
+          description: Usuario autenticado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usuario' }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /api/salud:
+    get:
+      tags: [Salud]
+      summary: Verifica el estado del API y MySQL
+      security: []
+      responses:
+        '200':
+          description: Servicio disponible
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '500': { $ref: '#/components/responses/Error' }
+
+  /api/categorias:
+    get:
+      tags: [Catálogo]
+      summary: Lista categorías
+      responses:
+        '200':
+          description: Categorías
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Categoria' } }
+    post:
+      tags: [Catálogo]
+      summary: Crea una categoría
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre]
+              additionalProperties: false
+              properties:
+                nombre: { type: string, minLength: 1, maxLength: 80 }
+      responses:
+        '201': { description: Categoría creada }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/categorias/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Catálogo]
+      summary: Obtiene una categoría
+      responses:
+        '200': { description: Categoría encontrada }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      tags: [Catálogo]
+      summary: Actualiza una categoría
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nombre]
+              additionalProperties: false
+              properties:
+                nombre: { type: string, minLength: 1, maxLength: 80 }
+      responses:
+        '200': { description: Categoría actualizada }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Catálogo]
+      summary: Elimina una categoría sin productos
+      responses:
+        '204': { description: Categoría eliminada }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/proveedores:
+    get:
+      tags: [Catálogo]
+      summary: Lista proveedores
+      responses:
+        '200': { description: Proveedores }
+    post:
+      tags: [Catálogo]
+      summary: Crea un proveedor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProveedorEntrada' }
+      responses:
+        '201': { description: Proveedor creado }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /api/proveedores/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Catálogo]
+      summary: Actualiza un proveedor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProveedorEntrada' }
+      responses:
+        '200': { description: Proveedor actualizado }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Catálogo]
+      summary: Elimina un proveedor sin productos
+      responses:
+        '204': { description: Proveedor eliminado }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/productos:
+    get:
+      tags: [Catálogo]
+      summary: Lista o busca productos activos
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+          description: Busca por nombre, marca o código de barras.
+      responses:
+        '200':
+          description: Productos
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Producto' } }
+    post:
+      tags: [Catálogo]
+      summary: Crea un producto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductoEntrada' }
+      responses:
+        '201': { description: Producto creado }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/productos/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Catálogo]
+      summary: Obtiene la ficha de un producto
+      responses:
+        '200': { description: Ficha, etiquetas y lotes FEFO }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      tags: [Catálogo]
+      summary: Actualiza un producto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductoEntrada' }
+      responses:
+        '200': { description: Producto actualizado }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Catálogo]
+      summary: Desactiva un producto
+      responses:
+        '204': { description: Producto desactivado }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/productos/{id}/plan-fefo:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Inventario]
+      summary: Simula una venta con FEFO
+      parameters:
+        - name: cantidad
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 1000000 }
+      responses:
+        '200': { description: Plan FEFO }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/etiquetas:
+    get:
+      tags: [Catálogo]
+      summary: Lista etiquetas activas
+      parameters:
+        - name: tipo
+          in: query
+          schema: { type: string, enum: [necesidad, ingrediente, contraindicacion, otro] }
+      responses:
+        '200': { description: Etiquetas }
+    post:
+      tags: [Catálogo]
+      summary: Crea una etiqueta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EtiquetaEntrada' }
+      responses:
+        '201': { description: Etiqueta creada }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /api/etiquetas/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Catálogo]
+      summary: Actualiza una etiqueta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EtiquetaEntrada' }
+      responses:
+        '200': { description: Etiqueta actualizada }
+    delete:
+      tags: [Catálogo]
+      summary: Desactiva una etiqueta
+      responses:
+        '204': { description: Etiqueta desactivada }
+
+  /api/etiquetas/{id}/productos:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Catálogo]
+      summary: Lista productos asociados a una etiqueta
+      responses:
+        '200': { description: Productos asociados }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/recomendaciones:
+    get:
+      tags: [Catálogo]
+      summary: Recomienda productos por necesidad
+      parameters:
+        - { name: necesidad, in: query, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: evitar, in: query, schema: { type: string }, description: IDs separados por coma }
+        - { name: disponibles, in: query, schema: { type: string, enum: ['0', '1'] } }
+      responses:
+        '200': { description: Recomendaciones }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /api/alertas/stock-bajo:
+    get:
+      tags: [Inventario]
+      summary: Lista productos con stock bajo
+      responses:
+        '200': { description: Alertas de stock bajo }
+
+  /api/alertas/vencimientos:
+    get:
+      tags: [Inventario]
+      summary: Lista lotes próximos a vencer
+      responses:
+        '200': { description: Alertas de vencimiento }
+
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+  responses:
+    Error:
+      description: Error de la solicitud
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+  schemas:
+    Usuario:
+      type: object
+      properties:
+        id: { type: integer }
+        nombre: { type: string }
+        email: { type: string, format: email }
+        rol: { type: string }
+        estado: { type: string }
+    Categoria:
+      type: object
+      properties:
+        id: { type: integer }
+        nombre: { type: string }
+        cantidad_productos: { type: integer }
+    ProveedorEntrada:
+      type: object
+      required: [nombre]
+      additionalProperties: false
+      properties:
+        nombre: { type: string, maxLength: 120 }
+        telefono: { type: string, nullable: true }
+        acepta_devolucion: { type: boolean }
+    Producto:
+      type: object
+      properties:
+        id: { type: integer }
+        codigo_barras: { type: string, nullable: true }
+        nombre: { type: string }
+        marca: { type: string, nullable: true }
+        presentacion: { type: string, nullable: true }
+        categoria_id: { type: integer }
+        categoria: { type: string }
+        precio_venta: { type: number, format: double }
+        es_granel: { type: boolean }
+        stock: { type: integer }
+        stock_minimo: { type: integer }
+        stock_bajo: { type: boolean }
+    ProductoEntrada:
+      type: object
+      required: [nombre, categoria_id]
+      additionalProperties: false
+      properties:
+        codigo_barras: { type: string, nullable: true }
+        nombre: { type: string, maxLength: 150 }
+        marca: { type: string, nullable: true }
+        presentacion: { type: string, nullable: true }
+        categoria_id: { type: integer, minimum: 1 }
+        proveedor_id: { type: integer, nullable: true }
+        precio_venta: { type: number, minimum: 0 }
+        margen_porcentaje: { type: number, nullable: true }
+        stock_minimo: { type: integer, minimum: 0 }
+        dias_alerta_temprana: { type: integer, minimum: 0 }
+        dias_alerta_liquidacion: { type: integer, minimum: 0 }
+        es_granel: { type: boolean }
+        para_que_sirve: { type: string, nullable: true }
+        modo_toma: { type: string, nullable: true }
+        contraindicaciones: { type: string, nullable: true }
+        ingredientes: { type: string, nullable: true }
+        aviso_complemento: { type: string, nullable: true }
+        etiquetas:
+          type: array
+          items: { type: integer, minimum: 1 }
+    EtiquetaEntrada:
+      type: object
+      required: [nombre]
+      additionalProperties: false
+      properties:
+        nombre: { type: string, maxLength: 80 }
+        tipo: { type: string, enum: [necesidad, ingrediente, contraindicacion, otro] }
+        activa: { type: boolean }
