@@ -59,6 +59,13 @@ func main() {
 	}
 	log.Printf("conectado a MySQL %s, base %s", cfg.DBHost, cfg.DBName)
 
+	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
+	err = iniciarRBAC(ctx, db)
+	cancel()
+	if err != nil {
+		log.Fatalf("control de acceso: %v", err)
+	}
+
 	if *crearPropietario != "" || *restablecer != "" {
 		if err := configurarAcceso(db, *crearPropietario, *restablecer); err != nil {
 			log.Fatal(err)
@@ -112,59 +119,98 @@ func (a *app) rutas() http.Handler {
 	return conRecuperacion(conLog(conCORS(a.protegerAPI(a.enrutador()))))
 }
 
-func (a *app) enrutador() http.Handler {
-	mux := http.NewServeMux()
+// rutaAPI asocia cada endpoint con el permiso que exige. protegerAPI niega
+// cualquier ruta /api/ que no aparezca aquí.
+type rutaAPI struct {
+	patron  string
+	permiso string // accesoPublico, accesoSesion o un permiso del catálogo
+	manejar http.HandlerFunc
+}
 
-	mux.HandleFunc("GET /api/salud", a.salud)
-	mux.HandleFunc("POST /api/login", a.login)
-	mux.HandleFunc("POST /api/logout", a.logout)
-	mux.HandleFunc("GET /api/sesion", a.sesionActual)
-	mux.HandleFunc("GET /api/usuarios", a.listarUsuarios)
-	mux.HandleFunc("POST /api/usuarios", a.crearUsuario)
-	mux.HandleFunc("PUT /api/usuarios/{id}", a.actualizarUsuario)
-	mux.HandleFunc("GET /api/lotes", a.listarLotes)
-	mux.HandleFunc("POST /api/lotes", a.crearLote)
-	mux.HandleFunc("PUT /api/lotes/{id}", a.actualizarLote)
-	mux.HandleFunc("GET /api/ventas", a.listarVentas)
-	mux.HandleFunc("GET /api/ventas/{id}", a.detalleVenta)
-	mux.HandleFunc("POST /api/ventas", a.crearVenta)
-	mux.HandleFunc("GET /api/bajas", a.listarBajas)
-	mux.HandleFunc("POST /api/bajas", a.crearBaja)
-	mux.HandleFunc("GET /api/reportes/ventas", a.reporteVentas)
-	mux.HandleFunc("GET /api/reportes/perdidas", a.reportePerdidas)
-	mux.HandleFunc("GET /api/reportes/rotacion", a.reporteRotacion)
-	mux.HandleFunc("GET /api/categorias", a.listarCategorias)
-	mux.HandleFunc("POST /api/categorias", a.crearCategoria)
-	mux.HandleFunc("PUT /api/categorias/{id}", a.actualizarCategoria)
-	mux.HandleFunc("GET /api/categorias/{id}", a.obtenerCategoria)
-	mux.HandleFunc("DELETE /api/categorias/{id}", a.eliminarCategoria)
-	mux.HandleFunc("GET /api/proveedores", a.listarProveedores)
-	mux.HandleFunc("POST /api/proveedores", a.crearProveedor)
-	mux.HandleFunc("PUT /api/proveedores/{id}", a.actualizarProveedor)
-	mux.HandleFunc("DELETE /api/proveedores/{id}", a.eliminarProveedor)
-	mux.HandleFunc("GET /api/productos", a.listarProductos)
-	mux.HandleFunc("POST /api/productos", a.crearProducto)
-	mux.HandleFunc("PUT /api/productos/{id}", a.actualizarProducto)
-	mux.HandleFunc("DELETE /api/productos/{id}", a.eliminarProducto)
-	mux.HandleFunc("GET /api/productos/{id}", a.detalleProducto)
-	mux.HandleFunc("GET /api/productos/{id}/plan-fefo", a.planFEFO)
-	mux.HandleFunc("GET /api/etiquetas", a.listarEtiquetas)
-	mux.HandleFunc("POST /api/etiquetas", a.crearEtiqueta)
-	mux.HandleFunc("PUT /api/etiquetas/{id}", a.actualizarEtiqueta)
-	mux.HandleFunc("DELETE /api/etiquetas/{id}", a.eliminarEtiqueta)
-	mux.HandleFunc("GET /api/etiquetas/{id}/productos", a.productosPorEtiqueta)
-	mux.HandleFunc("GET /api/recomendaciones", a.recomendaciones)
-	mux.HandleFunc("GET /api/alertas/stock-bajo", a.alertasStockBajo)
-	mux.HandleFunc("GET /api/alertas/vencimientos", a.alertasVencimientos)
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet, http.MethodPost, http.MethodDelete:
-			escribirError(w, http.StatusNotFound, "ruta no encontrada: "+r.Method+" "+r.URL.Path)
-		default:
-			w.Header().Set("Allow", "GET, POST, PUT, DELETE, OPTIONS")
-			escribirError(w, http.StatusMethodNotAllowed, "método no permitido: "+r.Method)
-		}
-	})
+func (a *app) rutasAPI() []rutaAPI {
+	return []rutaAPI{
+		{"GET /api/salud", accesoPublico, a.salud},
+		{"POST /api/login", accesoPublico, a.login},
+		{"POST /api/logout", accesoPublico, a.logout},
+		{"GET /api/sesion", accesoSesion, a.sesionActual},
+
+		{"GET /api/usuarios", "usuarios.ver", a.listarUsuarios},
+		{"POST /api/usuarios", "usuarios.crear", a.crearUsuario},
+		{"PUT /api/usuarios/{id}", "usuarios.editar", a.actualizarUsuario},
+		{"GET /api/usuarios/{id}/permisos", "usuarios.ver", a.permisosUsuario},
+		{"PUT /api/usuarios/{id}/roles", "roles.asignar", a.asignarRolesUsuario},
+		{"GET /api/permisos", "roles.ver", a.listarPermisos},
+		{"GET /api/roles", "roles.ver", a.listarRoles},
+		{"GET /api/roles/{id}", "roles.ver", a.obtenerRol},
+		{"POST /api/roles", "roles.gestionar", a.crearRol},
+		{"PUT /api/roles/{id}", "roles.gestionar", a.actualizarRol},
+		{"DELETE /api/roles/{id}", "roles.gestionar", a.eliminarRol},
+		{"GET /api/auditoria", "auditoria.ver", a.listarAuditoria},
+
+		{"GET /api/lotes", "lotes.ver", a.listarLotes},
+		{"POST /api/lotes", "lotes.crear", a.crearLote},
+		{"PUT /api/lotes/{id}", "lotes.editar", a.actualizarLote},
+		{"GET /api/ventas", "ventas.ver", a.listarVentas},
+		{"GET /api/ventas/{id}", "ventas.ver", a.detalleVenta},
+		{"POST /api/ventas", "ventas.crear", a.crearVenta},
+		{"GET /api/bajas", "bajas.ver", a.listarBajas},
+		{"POST /api/bajas", "bajas.crear", a.crearBaja},
+		{"GET /api/reportes/ventas", "reportes.ventas", a.reporteVentas},
+		{"GET /api/reportes/perdidas", "reportes.perdidas", a.reportePerdidas},
+		{"GET /api/reportes/rotacion", "reportes.rotacion", a.reporteRotacion},
+
+		{"GET /api/categorias", "categorias.ver", a.listarCategorias},
+		{"POST /api/categorias", "categorias.crear", a.crearCategoria},
+		{"PUT /api/categorias/{id}", "categorias.editar", a.actualizarCategoria},
+		{"GET /api/categorias/{id}", "categorias.ver", a.obtenerCategoria},
+		{"DELETE /api/categorias/{id}", "categorias.eliminar", a.eliminarCategoria},
+		{"GET /api/proveedores", "proveedores.ver", a.listarProveedores},
+		{"POST /api/proveedores", "proveedores.crear", a.crearProveedor},
+		{"PUT /api/proveedores/{id}", "proveedores.editar", a.actualizarProveedor},
+		{"DELETE /api/proveedores/{id}", "proveedores.eliminar", a.eliminarProveedor},
+		{"GET /api/productos", "productos.ver", a.listarProductos},
+		{"POST /api/productos", "productos.crear", a.crearProducto},
+		{"PUT /api/productos/{id}", "productos.editar", a.actualizarProducto},
+		{"DELETE /api/productos/{id}", "productos.eliminar", a.eliminarProducto},
+		{"GET /api/productos/{id}", "productos.ver", a.detalleProducto},
+		{"GET /api/productos/{id}/plan-fefo", "productos.ver", a.planFEFO},
+		{"GET /api/etiquetas", "etiquetas.ver", a.listarEtiquetas},
+		{"POST /api/etiquetas", "etiquetas.crear", a.crearEtiqueta},
+		{"PUT /api/etiquetas/{id}", "etiquetas.editar", a.actualizarEtiqueta},
+		{"DELETE /api/etiquetas/{id}", "etiquetas.eliminar", a.eliminarEtiqueta},
+		{"GET /api/etiquetas/{id}/productos", "etiquetas.ver", a.productosPorEtiqueta},
+		{"GET /api/recomendaciones", "recomendaciones.consultar", a.recomendaciones},
+		{"GET /api/alertas/stock-bajo", "alertas.ver", a.alertasStockBajo},
+		{"GET /api/alertas/vencimientos", "alertas.ver", a.alertasVencimientos},
+
+		// Respuesta 404/405 para el resto de /api/ (requiere sesión, no revela rutas).
+		{"/api/", accesoSesion, rutaNoEncontrada},
+	}
+}
+
+var permisoDeRuta = func() map[string]string {
+	m := map[string]string{}
+	for _, r := range (&app{}).rutasAPI() {
+		m[r.patron] = r.permiso
+	}
+	return m
+}()
+
+func rutaNoEncontrada(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet, http.MethodPost, http.MethodDelete:
+		escribirError(w, http.StatusNotFound, "ruta no encontrada: "+r.Method+" "+r.URL.Path)
+	default:
+		w.Header().Set("Allow", "GET, POST, PUT, DELETE, OPTIONS")
+		escribirError(w, http.StatusMethodNotAllowed, "método no permitido: "+r.Method)
+	}
+}
+
+func (a *app) enrutador() *http.ServeMux {
+	mux := http.NewServeMux()
+	for _, r := range a.rutasAPI() {
+		mux.HandleFunc(r.patron, r.manejar)
+	}
 
 	// Frontend público de prueba.
 	web, err := fs.Sub(webFS, "web")

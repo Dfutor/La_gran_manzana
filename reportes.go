@@ -144,8 +144,16 @@ func (a *app) listarVentas(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := ctxConsulta(r)
 	defer cancel()
-	rows, err := a.db.QueryContext(ctx, `SELECT v.id,v.usuario_id,u.nombre AS usuario,v.fecha_hora,v.medio_pago,v.total FROM ventas v JOIN usuarios u ON u.id=v.usuario_id WHERE v.fecha_hora>=? AND v.fecha_hora<DATE_ADD(?,INTERVAL 1 DAY) ORDER BY v.fecha_hora DESC,v.id DESC LIMIT ? OFFSET ?`, desde, hasta, limite, offset)
+	todas, propio := alcance(r, permVentasVerTodas)
+	rows, err := a.db.QueryContext(ctx, `SELECT v.id,v.usuario_id,u.nombre AS usuario,v.fecha_hora,v.medio_pago,v.total FROM ventas v JOIN usuarios u ON u.id=v.usuario_id WHERE v.fecha_hora>=? AND v.fecha_hora<DATE_ADD(?,INTERVAL 1 DAY) AND (?=1 OR v.usuario_id=?) ORDER BY v.fecha_hora DESC,v.id DESC LIMIT ? OFFSET ?`, desde, hasta, todas, propio, limite, offset)
 	responderFilas(w, r, rows, err)
+}
+
+// alcance indica si el usuario ve los registros de todos (permiso *.ver_todas)
+// o solo los propios, identificados por su ID.
+func alcance(r *http.Request, permisoTodas string) (todas bool, usuarioID int64) {
+	u := usuarioActual(r)
+	return u.tiene(permisoTodas), u.ID
 }
 func (a *app) detalleVenta(w http.ResponseWriter, r *http.Request) {
 	id, ok := idDeRuta(r)
@@ -159,7 +167,8 @@ func (a *app) detalleVenta(w http.ResponseWriter, r *http.Request) {
 	var fecha time.Time
 	var pago string
 	var total dinero
-	err := a.db.QueryRowContext(ctx, `SELECT usuario_id,fecha_hora,medio_pago,total FROM ventas WHERE id=?`, id).Scan(&u, &fecha, &pago, &total)
+	todas, propio := alcance(r, permVentasVerTodas)
+	err := a.db.QueryRowContext(ctx, `SELECT usuario_id,fecha_hora,medio_pago,total FROM ventas WHERE id=? AND (?=1 OR usuario_id=?)`, id, todas, propio).Scan(&u, &fecha, &pago, &total)
 	if err == sql.ErrNoRows {
 		escribirError(w, 404, "venta no encontrada")
 		return
@@ -209,7 +218,8 @@ func (a *app) listarBajas(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := ctxConsulta(r)
 	defer cancel()
-	rows, err := a.db.QueryContext(ctx, `SELECT b.id,b.producto_id,p.nombre AS producto,b.lote_id,b.cantidad,b.motivo,b.accion_previa,b.costo_unitario,b.valor_perdido,b.fecha_baja,b.usuario_id FROM bajas b JOIN productos p ON p.id=b.producto_id WHERE b.fecha_baja>=? AND b.fecha_baja<DATE_ADD(?,INTERVAL 1 DAY) ORDER BY b.fecha_baja DESC,b.id DESC LIMIT ? OFFSET ?`, desde, hasta, limite, offset)
+	todas, propio := alcance(r, permBajasVerTodas)
+	rows, err := a.db.QueryContext(ctx, `SELECT b.id,b.producto_id,p.nombre AS producto,b.lote_id,b.cantidad,b.motivo,b.accion_previa,b.costo_unitario,b.valor_perdido,b.fecha_baja,b.usuario_id FROM bajas b JOIN productos p ON p.id=b.producto_id WHERE b.fecha_baja>=? AND b.fecha_baja<DATE_ADD(?,INTERVAL 1 DAY) AND (?=1 OR b.usuario_id=?) ORDER BY b.fecha_baja DESC,b.id DESC LIMIT ? OFFSET ?`, desde, hasta, todas, propio, limite, offset)
 	responderFilas(w, r, rows, err)
 }
 func (a *app) reporteVentas(w http.ResponseWriter, r *http.Request) {

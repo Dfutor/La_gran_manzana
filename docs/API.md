@@ -9,12 +9,12 @@ de la tienda naturista «La Gran Manzana» (Melgar, Tolima). Proyecto de Calidad
 | **Frontend de prueba** | `http://158.158.17.188/granmanzana/` (básico, con *Probador de API*) |
 | **Documentación privada + colección Postman** | `http://158.158.17.188/granmanzana/docs/` (usuario y contraseña) |
 | **Formato** | JSON en UTF-8 |
-| **Autenticación** | Sesión con cookie HttpOnly después de `POST /api/login`; escrituras de catálogo, usuarios y reportes reservados al propietario. |
+| **Autenticación** | Sesión con cookie HttpOnly después de `POST /api/login`; cada ruta exige un permiso (RBAC con roles configurables). |
 | **CORS** | `Access-Control-Allow-Origin: *` |
 
 ## Login y permisos
 
-`POST /api/login` recibe `{"email":"correo@tienda.com","password":"contraseña"}` y devuelve los datos públicos del usuario; guarda una cookie de sesión de ocho horas. `GET /api/sesion` consulta el acceso actual; `POST /api/logout` lo revoca. Reiniciar cierra todas las sesiones. Contraseñas almacenadas con bcrypt; los hashes de marcador no permiten ingresar. El primer acceso se configura por consola según README.
+`POST /api/login` recibe `{"email":"correo@tienda.com","password":"contraseña"}` y devuelve los datos públicos del usuario con `roles` y `permisos` efectivos; guarda una cookie de sesión de ocho horas. `GET /api/sesion` consulta el acceso actual; `POST /api/logout` lo revoca. Reiniciar cierra todas las sesiones. Contraseñas almacenadas con bcrypt; los hashes de marcador no permiten ingresar. El primer acceso se configura por consola según README.
 
 Ejemplo para curl, con un archivo temporal que contenga el JSON del login (permisos 600, eliminar después):
 
@@ -24,20 +24,20 @@ curl -b cookies.txt http://127.0.0.1:8080/api/productos
 curl -b cookies.txt -X POST http://127.0.0.1:8080/api/logout
 ```
 
-Añadir `-b cookies.txt` a los ejemplos siguientes. `401`: falta sesión/está revocada; `403`: falta rol o Origin no permitido; `429`: límite de login. Empleado y propietario consultan catálogo/alertas/historial y registran ventas, lotes y bajas. Solo propietario modifica catálogo, corrige lotes, administra usuarios y consulta reportes. Las cookies se usan en el mismo origen; CORS no habilita sesiones entre sitios.
+Añadir `-b cookies.txt` a los ejemplos siguientes. `401`: falta sesión/está revocada; `403`: falta el permiso de la ruta (el mensaje lo nombra) o Origin no permitido; `429`: límite de login. El permiso de cada ruta figura en README y en `rutasAPI` (`main.go`); los roles iniciales son Propietario (todo) y Empleado (catálogo en consulta, alertas, ventas, lotes y bajas). Las cookies se usan en el mismo origen; CORS no habilita sesiones entre sitios.
 
 ## Movimientos, usuarios y reportes
 
 | Método/ruta | Entrada y resultado |
 |---|---|
-| `GET/POST /api/usuarios`, `PUT /api/usuarios/{id}` | `{nombre,email,password,rol,estado}`; rol propietario/empleado, estado activo/inactivo. Password obligatorio al crear, opcional al editar, 12–72 bytes. GET omite hashes. |
+| `GET/POST /api/usuarios`, `PUT /api/usuarios/{id}` | `{nombre,email,password,estado}`; estado activo/inactivo. Password obligatorio al crear, opcional al editar, 12–72 bytes. GET incluye `roles` y omite hashes. Un usuario nuevo no tiene roles. 403 si el usuario editado tiene permisos que quien edita no tiene. |
 | `GET /api/lotes?producto_id=ID` | Todos los lotes, incluidos vencidos/agotados, en orden de vencimiento/ID. |
 | `POST /api/lotes` | `{producto_id,codigo_lote?,numero_factura?,fecha_vencimiento,cantidad,costo_unitario}`; cantidad positiva, fecha vigente y costo con hasta dos decimales. 201 con ID/cantidad actual. |
 | `PUT /api/lotes/{id}` | `{codigo_lote?,numero_factura?,fecha_vencimiento}`; no modifica cantidades ni costos históricos. |
 | `POST /api/ventas` | `{medio_pago,detalles:[{producto_id,cantidad,precio_unitario?}]}`; hasta 100 productos únicos; cantidades 1..1000000. Precio opcional de oferta; si se omite usa catálogo. Total calculado por servidor en centavos exactos. |
-| `GET /api/ventas`, `GET /api/ventas/{id}` | Encabezados paginados y detalle con precio histórico. La distribución FEFO se devuelve al crear la venta; no se persiste porque el esquema actual no contiene venta-lote. |
+| `GET /api/ventas`, `GET /api/ventas/{id}` | Encabezados paginados y detalle con precio histórico. Sin `ventas.ver_todas` solo las propias (otra venta: 404). La distribución FEFO se devuelve al crear la venta; no se persiste porque el esquema actual no contiene venta-lote. |
 | `POST /api/bajas` | `{lote_id,cantidad,motivo,accion_previa?}`; producto/costo/usuario derivados del lote y sesión. Acción por defecto ninguna. 201 con ID/valor perdido/stock restante. |
-| `GET /api/bajas` | Historial de salidas con motivo/acción/costo/usuario. |
+| `GET /api/bajas` | Historial de salidas con motivo/acción/costo/usuario. Sin `bajas.ver_todas` solo las propias. |
 | `GET /api/reportes/ventas?agrupar=dia` | Ventas/total por día y medio de pago. `agrupar=producto`: ranking de unidades y total vendido. |
 | `GET /api/reportes/perdidas` | Unidades y valor de bajas por motivo y acción previa. |
 | `GET /api/reportes/rotacion` | Stock actual, unidades/total del periodo, promedio diario, días de cobertura, sugerencia de compra a 30 días y estado sin_movimiento/reponer/con_movimiento. |
@@ -57,6 +57,27 @@ Baja de ejemplo:
 ```
 
 Motivos: vencimiento/deterioro/obsequio/devolucion/otro. Acciones: ninguna/venta_destacada/rebaja/combo/devolucion_distribuidor/obsequio. Una baja por vencimiento exige lote ya vencido. Ventas y bajas descuentan lotes en transacciones con bloqueo: stock insuficiente devuelve 409 y revierte todos los cambios.
+
+## Roles y permisos
+
+| Método/ruta | Permiso | Entrada y resultado |
+|---|---|---|
+| `GET /api/permisos` | `roles.ver` | Catálogo: `[{nombre,modulo,descripcion,critico}]`. Los permisos se definen en el código. |
+| `GET /api/roles`, `GET /api/roles/{id}` | `roles.ver` | `{id,nombre,descripcion,es_sistema,activo,permisos:[...],cantidad_usuarios}`; el detalle agrega `usuarios`. |
+| `POST /api/roles` | `roles.gestionar` | `{nombre,descripcion?,activo?,permisos:[nombres]}`; nombre único de 1–60 caracteres (sin distinguir mayúsculas/tildes). 201 con el rol. 403 si incluye permisos que usted no tiene; 409 si el nombre existe. |
+| `PUT /api/roles/{id}` | `roles.gestionar` | Mismo cuerpo; reemplaza nombre, descripción, estado y permisos. `activo:false` desactiva el rol: deja de otorgar permisos sin quitar asignaciones. 409 para el rol del sistema o un rol que usted tiene; 403 si el rol (antes o después) tiene permisos que usted no tiene. |
+| `DELETE /api/roles/{id}` | `roles.gestionar` | 204. 409 si es del sistema, si lo tiene asignado o si tiene usuarios (quíteselo o desactívelo). |
+| `PUT /api/usuarios/{id}/roles` | `roles.asignar` | `{roles:[ids]}` reemplaza los roles del usuario (lista vacía = sin roles). Devuelve lo mismo que `GET .../permisos`. 409 para usted mismo o si dejaría sin propietario activo; 403 si los roles anteriores o nuevos tienen permisos que usted no tiene. |
+| `GET /api/usuarios/{id}/permisos` | `usuarios.ver` | `{usuario,activo,roles:[{id,nombre,activo}],permisos:[{nombre,modulo,descripcion,critico,roles:[origen]}]}`: permisos efectivos y qué rol los otorga. |
+| `GET /api/auditoria` | `auditoria.ver` | Cambios de acceso, del más reciente: `{id,fecha,actor_id,actor,accion,entidad,entidad_id,detalle}`. Acciones: `rol.crear/editar/eliminar`, `usuario.crear/editar/roles`, `sistema.inicializar`. Admite `limite`/`offset`. |
+
+Un usuario recibe la unión de los permisos de sus roles **activos**. Los permisos se consultan en cada petición: los cambios aplican en la siguiente solicitud del usuario afectado, sin cerrar su sesión.
+
+Rol de ejemplo:
+
+```json
+{"nombre":"Cajero","descripcion":"Atiende el mostrador","permisos":["productos.ver","recomendaciones.consultar","ventas.ver","ventas.crear","alertas.ver"]}
+```
 
 ## Convenciones
 

@@ -2,7 +2,7 @@
 
 | Requisito presente | Implementación / evidencia |
 |---|---|
-| Acceso y persistencia | Login bcrypt y roles sobre usuarios; escrituras MySQL con la conexión existente; formularios de operación. |
+| Acceso y persistencia | Login bcrypt; control de acceso basado en roles configurable (roles dinámicos, permisos granulares por acción, varios roles por usuario, alcance propio/todos en ventas y bajas, reglas contra escalada y auditoría); escrituras MySQL con la conexión existente; formularios de operación. |
 | Registro, actualización y consulta de productos/lotes | Catálogo/fichas/etiquetas; ingreso y corrección de lotes; stock derivado de cantidades vigentes. |
 | Rotación FEFO | Simulación y venta transaccional por vencimiento/ID, excluyendo vencidos y agotados; prueba de venta concurrente. |
 | Ventas y medios de pago | Encabezado/detalles, efectivo/Nequi/Daviplata, precios históricos, ofertas y rollback completo. |

@@ -49,6 +49,9 @@ func appIntegracion(t *testing.T) (*app, *httptest.Server) {
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatalf("MySQL no responde: %v", err)
 	}
+	if err := iniciarRBAC(ctx, db); err != nil {
+		t.Fatal(err)
+	}
 	a := &app{db: db}
 	srv := httptest.NewServer(a.rutas())
 	hash, err := bcrypt.GenerateFromPassword([]byte("ClavePruebas123!"), bcrypt.MinCost)
@@ -61,6 +64,9 @@ func appIntegracion(t *testing.T) (*app, *httptest.Server) {
 		t.Fatal(err)
 	}
 	uid, _ := res.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO usuario_roles(usuario_id,rol_id) SELECT ?,id FROM roles WHERE es_sistema=1`, uid); err != nil {
+		t.Fatal(err)
+	}
 	cuerpo, _ := json.Marshal(map[string]string{"email": email, "password": "ClavePruebas123!"})
 	resp, err := http.Post(srv.URL+"/api/login", "application/json", bytes.NewReader(cuerpo))
 	if err != nil {

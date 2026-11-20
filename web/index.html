@@ -18,16 +18,19 @@
   <p id="aviso-alertas" role="status" aria-live="polite"></p>
   <p>Estado: <span id="estado">verificando…</span></p>
 
+  <!-- data-permiso: el elemento se muestra si el usuario tiene alguno de esos permisos.
+       Es solo comodidad visual: el servidor valida cada permiso en el API. -->
   <nav id="pestanas">
-    <button data-tab="productos">Productos</button>
-    <button data-tab="necesidades">¿Qué necesita el cliente?</button>
-    <button data-tab="alertas">Alertas</button>
-    <button data-tab="categorias">Categorías</button>
-    <button data-tab="ventas">Ventas</button>
-    <button data-tab="inventario">Lotes y bajas</button>
-    <button data-tab="administracion" data-propietario>Administración</button>
-    <button data-tab="reportes" data-propietario>Reportes</button>
-    <button data-tab="probador" data-propietario>Probador de API</button>
+    <button data-tab="productos" data-permiso="productos.ver">Productos</button>
+    <button data-tab="necesidades" data-permiso="recomendaciones.consultar">¿Qué necesita el cliente?</button>
+    <button data-tab="alertas" data-permiso="alertas.ver">Alertas</button>
+    <button data-tab="categorias" data-permiso="categorias.ver">Categorías</button>
+    <button data-tab="ventas" data-permiso="ventas.crear ventas.ver">Ventas</button>
+    <button data-tab="inventario" data-permiso="lotes.ver lotes.crear lotes.editar bajas.ver bajas.crear">Lotes y bajas</button>
+    <button data-tab="administracion" data-permiso="productos.crear productos.editar productos.eliminar categorias.crear categorias.editar categorias.eliminar proveedores.crear proveedores.editar proveedores.eliminar etiquetas.crear etiquetas.editar etiquetas.eliminar usuarios.ver usuarios.crear usuarios.editar">Administración</button>
+    <button data-tab="accesos" data-permiso="roles.ver usuarios.ver auditoria.ver">Roles y permisos</button>
+    <button data-tab="reportes" data-permiso="reportes.ventas reportes.perdidas reportes.rotacion">Reportes</button>
+    <button data-tab="probador">Probador de API</button>
   </nav>
   <hr>
 
@@ -77,7 +80,7 @@
   </section>
 
   <section id="tab-categorias" class="panel" hidden>
-    <form id="form-categoria" data-propietario>
+    <form id="form-categoria" data-permiso="categorias.crear">
       <input id="cat-nombre" type="text" placeholder="Nueva categoría (máx. 80)" aria-label="Nombre">
       <button type="submit">Crear</button>
     </form>
@@ -86,9 +89,9 @@
   </section>
 
   <section id="tab-ventas" class="panel" hidden>
-    <h2>Registrar venta</h2>
-    <p>En productos a granel una unidad representa 100 g. El sistema selecciona los lotes FEFO y excluye los vencidos.</p>
-    <form id="form-venta">
+    <h2 data-permiso="ventas.crear">Registrar venta</h2>
+    <p data-permiso="ventas.crear">En productos a granel una unidad representa 100 g. El sistema selecciona los lotes FEFO y excluye los vencidos.</p>
+    <form id="form-venta" data-permiso="ventas.crear">
       <label>Producto <select id="venta-producto" required></select></label>
       <label>Cantidad <input id="venta-cantidad" type="number" min="1" max="1000000" value="1" required></label>
       <label>Precio unitario de oferta (opcional) <input id="venta-precio" type="number" min="0" step="0.01"></label>
@@ -98,13 +101,13 @@
       <button id="guardar-venta">Guardar venta</button>
     </form>
     <p id="venta-msg" role="status"></p>
-    <button id="historial-ventas">Consultar ventas de los últimos 30 días</button>
+    <button id="historial-ventas" data-permiso="ventas.ver">Consultar ventas de los últimos 30 días</button>
     <div id="ventas-lista" class="scroll"></div>
   </section>
 
   <section id="tab-inventario" class="panel" hidden>
-    <h2>Ingreso de lote</h2>
-    <form id="form-lote">
+    <h2 data-permiso="lotes.crear">Ingreso de lote</h2>
+    <form id="form-lote" data-permiso="lotes.crear">
       <label>Producto <select name="producto_id" class="selector-producto" required></select></label>
       <label>Código del lote <input name="codigo_lote" maxlength="60"></label>
       <label>Factura <input name="numero_factura" maxlength="50"></label>
@@ -113,10 +116,10 @@
       <label>Costo por unidad <input name="costo_unitario" type="number" min="0" step="0.01" required></label>
       <button>Guardar ingreso</button><p class="resultado" role="status"></p>
     </form>
-    <h2>Consultar lotes</h2>
-    <form id="form-lotes-buscar"><label>Producto <select id="lotes-producto" class="selector-producto"></select></label><button>Consultar</button></form>
+    <h2 data-permiso="lotes.ver">Consultar lotes</h2>
+    <form id="form-lotes-buscar" data-permiso="lotes.ver"><label>Producto <select id="lotes-producto" class="selector-producto"></select></label><button>Consultar</button></form>
     <div id="lotes-lista" class="scroll"></div>
-    <form id="form-editar-lote" data-propietario>
+    <form id="form-editar-lote" data-permiso="lotes.editar">
       <h3>Corregir datos de un lote</h3>
       <label>ID lote <input name="id" type="number" min="1" required></label>
       <label>Código <input name="codigo_lote" maxlength="60"></label>
@@ -124,15 +127,15 @@
       <label>Vencimiento <input name="fecha_vencimiento" type="date" required></label>
       <button>Actualizar lote</button><p class="resultado" role="status"></p>
     </form>
-    <h2>Registrar baja</h2>
-    <form id="form-baja">
+    <h2 data-permiso="bajas.crear">Registrar baja</h2>
+    <form id="form-baja" data-permiso="bajas.crear">
       <label>ID lote <input name="lote_id" type="number" min="1" required></label>
       <label>Cantidad <input name="cantidad" type="number" min="1" max="1000000" required></label>
       <label>Motivo <select name="motivo"><option>vencimiento</option><option>deterioro</option><option>obsequio</option><option>devolucion</option><option>otro</option></select></label>
       <label>Acción previa <select name="accion_previa"><option>ninguna</option><option>venta_destacada</option><option>rebaja</option><option>combo</option><option>devolucion_distribuidor</option><option>obsequio</option></select></label>
       <button>Guardar baja</button><p class="resultado" role="status"></p>
     </form>
-    <button id="historial-bajas">Consultar bajas de los últimos 30 días</button><div id="bajas-lista" class="scroll"></div>
+    <button id="historial-bajas" data-permiso="bajas.ver">Consultar bajas de los últimos 30 días</button><div id="bajas-lista" class="scroll"></div>
   </section>
 
   <section id="tab-administracion" class="panel" hidden>
@@ -141,12 +144,20 @@
     <div id="formularios-admin"></div>
   </section>
 
+  <section id="tab-accesos" class="panel" hidden>
+    <h2>Roles y permisos</h2>
+    <p>Un rol agrupa permisos; cada usuario recibe la suma de los permisos de sus roles activos. Los cambios aplican en la siguiente acción del usuario, sin cerrar su sesión. Solo puede otorgar, quitar o editar permisos que usted también tiene, y no puede cambiar sus propios roles.</p>
+    <div id="accesos-roles" data-permiso="roles.ver"></div>
+    <div id="accesos-usuarios" data-permiso="usuarios.ver"></div>
+    <div id="accesos-auditoria" data-permiso="auditoria.ver"></div>
+  </section>
+
   <section id="tab-reportes" class="panel" hidden>
     <h2>Reportes</h2>
     <form id="form-reporte">
       <label>Desde <input name="desde" type="date" required></label>
       <label>Hasta <input name="hasta" type="date" required></label>
-      <label>Reporte <select name="tipo"><option value="ventas">Ventas por día y pago</option><option value="ventas?agrupar=producto">Productos más vendidos</option><option value="perdidas">Pérdidas y acciones previas</option><option value="rotacion">Rotación y reposición</option></select></label>
+      <label>Reporte <select name="tipo"><option value="ventas" data-permiso="reportes.ventas">Ventas por día y pago</option><option value="ventas?agrupar=producto" data-permiso="reportes.ventas">Productos más vendidos</option><option value="perdidas" data-permiso="reportes.perdidas">Pérdidas y acciones previas</option><option value="rotacion" data-permiso="reportes.rotacion">Rotación y reposición</option></select></label>
       <button>Consultar</button>
     </form>
     <p>Reposición: estimación de 30 días según las ventas del periodo y el stock vigente actual. Sin movimiento significa que no hubo ventas en el periodo.</p>
@@ -161,5 +172,6 @@
   </div>
   <script src="app.js"></script>
   <script src="operacion.js"></script>
+  <script src="roles.js"></script>
 </body>
 </html>

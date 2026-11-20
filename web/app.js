@@ -38,6 +38,8 @@ async function api(ruta, opciones = {}) {
     const resp = await fetch(ruta, { ...opciones, headers: { Accept: 'application/json', ...(opciones.headers || {}) } });
     const crudo = await resp.text();
     if (resp.status === 401 && ruta !== '/api/login') mostrarSesion(null);
+    // Un 403 puede significar que le quitaron permisos: se refresca el perfil.
+    if (resp.status === 403 && ruta !== '/api/sesion') recargarSesion();
     let data = null;
     try { data = crudo ? JSON.parse(crudo) : null; } catch { data = null; }
     return { ok: resp.ok, status: resp.status, data, crudo, ms: Math.round(performance.now() - inicio) };
@@ -83,11 +85,14 @@ const cargadores = {
   ventas: () => cargarSelectores(),
   inventario: () => cargarSelectores(),
   administracion: () => armarAdministracion(),
+  accesos: () => armarAccesos(),
   reportes: () => prepararReportes(),
 };
 
 function activarPestana(nombre) {
-  if (['reportes', 'administracion', 'probador'].includes(nombre) && usuarioSesion?.rol !== 'propietario') nombre = 'productos';
+  // Solo se abren pestañas visibles para los permisos actuales; si no, la primera disponible.
+  const visibles = [...document.querySelectorAll('#pestanas button')].filter((b) => !b.hidden).map((b) => b.dataset.tab);
+  if (!visibles.includes(nombre)) nombre = visibles[0];
   document.querySelectorAll('#pestanas button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === nombre)));
   document.querySelectorAll('.panel').forEach((p) => { p.hidden = p.id !== 'tab-' + nombre; });
   if (!cargadas[nombre]) {
@@ -234,7 +239,7 @@ async function cargarCategorias(resaltarId) {
   if (!r.ok) { ul.replaceChildren(h('li', { class: 'err' }, mensajeError(r))); return; }
   ul.replaceChildren(...r.data.map((c) => h('li', { class: c.id === resaltarId ? 'ok' : null },
     `${c.nombre} (id ${c.id}, ${c.cantidad_productos} productos) `,
-    c.cantidad_productos === 0 ? h('button', { type: 'button', onclick: () => eliminarCategoria(c.id, c.nombre) }, 'Eliminar') : null)));
+    c.cantidad_productos === 0 && puede('categorias.eliminar') ? h('button', { type: 'button', onclick: () => eliminarCategoria(c.id, c.nombre) }, 'Eliminar') : null)));
 }
 
 async function crearCategoria(ev) {
