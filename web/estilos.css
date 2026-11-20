@@ -21,3 +21,13 @@ form { margin: 1rem 0; padding: .5rem; border: 1px solid #ccc; }
 label { display: inline-block; margin: .3rem; }
 textarea { vertical-align: top; }
 [hidden] { display: none !important; }
+
+/* Roles y permisos */
+.matriz-permisos { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; }
+.matriz-permisos fieldset { flex: 1 1 16rem; border: 1px solid #ccc; }
+.matriz-permisos legend { font-weight: bold; }
+.matriz-permisos legend button { font-size: .75rem; font-weight: normal; }
+label.permiso { display: block; margin: .25rem 0; }
+label.permiso code { font-size: .75rem; color: #666; margin-left: 1.4rem; }
+.critico { color: #c62828; font-size: .8rem; }
+tr.inactivo { color: #777; }

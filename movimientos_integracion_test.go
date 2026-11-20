@@ -165,11 +165,14 @@ func TestIntegracionLoginYPermisos(t *testing.T) {
 	a, srv := appIntegracion(t)
 	email := fmt.Sprintf("empleado%d@example.test", time.Now().UnixNano())
 	var u usuario
-	cuerpo, _ := json.Marshal(map[string]string{"nombre": "Empleado prueba", "email": email, "password": "ClaveEmpleado123!", "rol": "empleado"})
-	if c := pedir(t, "POST", srv.URL+"/api/usuarios", string(cuerpo), &u); c != 201 {
-		t.Fatal(c)
+	cuerpo, _ := json.Marshal(map[string]string{"nombre": "Empleado prueba", "email": email, "password": "ClaveEmpleado123!"})
+	if c := pedir(t, "POST", srv.URL+"/api/usuarios", string(cuerpo), &u); c != 201 || len(u.Roles) != 0 {
+		t.Fatal("un usuario nuevo nace sin roles", c, u.Roles)
 	}
 	t.Cleanup(func() { a.db.Exec(`DELETE FROM usuarios WHERE id=?`, u.ID) })
+	if c := pedir(t, "PUT", fmt.Sprintf("%s/api/usuarios/%d/roles", srv.URL, u.ID), fmt.Sprintf(`{"roles":[%d]}`, rolPorNombre(t, srv, nombreRolEmpleado)), nil); c != 200 {
+		t.Fatal("asignar Empleado", c)
+	}
 	cuerpo, _ = json.Marshal(map[string]string{"email": email, "password": "ClaveEmpleado123!"})
 	resp, err := http.Post(srv.URL+"/api/login", "application/json", bytes.NewReader(cuerpo))
 	if err != nil {

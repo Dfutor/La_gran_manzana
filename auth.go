@@ -9,11 +9,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/mail"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -26,12 +28,17 @@ const nombreCookie = "granmanzana_sesion"
 const duracionSesion = 8 * time.Hour
 
 type usuario struct {
-	ID     int64  `json:"id"`
-	Nombre string `json:"nombre"`
-	Email  string `json:"email"`
-	Rol    string `json:"rol"`
-	Estado string `json:"estado"`
+	ID     int64        `json:"id"`
+	Nombre string       `json:"nombre"`
+	Email  string       `json:"email"`
+	Estado string       `json:"estado"`
+	Roles  []rolResumen `json:"roles"`
+	// permisos efectivos, cargados por el middleware en cada petición.
+	permisos map[string]bool
 }
+
+func (u usuario) tiene(permiso string) bool { return u.permisos[permiso] }
+
 type sesion struct {
 	UsuarioID int64
 	Hash      string
@@ -116,7 +123,7 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var u usuario
 	var hash string
-	err = a.db.QueryRowContext(ctx, `SELECT id,nombre,email,rol,estado,password_hash FROM usuarios WHERE email=?`, in.Email).Scan(&u.ID, &u.Nombre, &u.Email, &u.Rol, &u.Estado, &hash)
+	err = a.db.QueryRowContext(ctx, `SELECT id,nombre,email,estado,password_hash FROM usuarios WHERE email=?`, in.Email).Scan(&u.ID, &u.Nombre, &u.Email, &u.Estado, &hash)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		errorInterno(w, r, err)
 		return
@@ -131,6 +138,15 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err = a.db.ExecContext(ctx, `UPDATE usuarios SET fecha_ultimo_login=NOW() WHERE id=?`, u.ID); err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	if u.permisos, err = permisosEfectivos(ctx, a.db, u.ID); err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	p, err := a.perfil(ctx, u)
+	if err != nil {
 		errorInterno(w, r, err)
 		return
 	}
@@ -155,7 +171,7 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 	delete(a.auth.intentos, ip)
 	a.auth.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: nombreCookie, Value: token, Path: "/api/", HttpOnly: true, Secure: a.cookieSegura, SameSite: http.SameSiteStrictMode, MaxAge: int(duracionSesion.Seconds())})
-	escribirJSON(w, 200, u)
+	escribirJSON(w, 200, p)
 }
 func (a *app) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(nombreCookie); err == nil {
@@ -167,18 +183,14 @@ func (a *app) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (a *app) sesionActual(w http.ResponseWriter, r *http.Request) {
-	escribirJSON(w, 200, usuarioActual(r))
-}
-
-func requierePropietario(r *http.Request) bool {
-	p := r.URL.Path
-	if strings.HasPrefix(p, "/api/usuarios") || strings.HasPrefix(p, "/api/reportes/") {
-		return true
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	p, err := a.perfil(ctx, usuarioActual(r))
+	if err != nil {
+		errorInterno(w, r, err)
+		return
 	}
-	if r.Method == "GET" || r.Method == "HEAD" {
-		return false
-	}
-	return p != "/api/ventas" && p != "/api/bajas" && p != "/api/lotes" && p != "/api/logout"
+	escribirJSON(w, 200, p)
 }
 
 // Apache puede conservar Host o enviar X-Forwarded-Host. Solo se confía en
@@ -194,12 +206,16 @@ func hostPublico(r *http.Request) string {
 	return r.Host
 }
 
-func (a *app) protegerAPI(next http.Handler) http.Handler {
+// protegerAPI autentica la sesión y autoriza cada ruta según el permiso que
+// declara rutasAPI. Una ruta sin permiso declarado se niega (denegar por defecto).
+func (a *app) protegerAPI(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/") {
-			next.ServeHTTP(w, r)
+			mux.ServeHTTP(w, r)
 			return
 		}
+		_, patron := mux.Handler(r)
+		permiso, declarada := permisoDeRuta[patron]
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS" {
 			if origen := r.Header.Get("Origin"); origen != "" {
@@ -214,8 +230,8 @@ func (a *app) protegerAPI(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if r.URL.Path == "/api/salud" || r.URL.Path == "/api/login" || r.URL.Path == "/api/logout" {
-			next.ServeHTTP(w, r)
+		if declarada && permiso == accesoPublico {
+			mux.ServeHTTP(w, r)
 			return
 		}
 		c, err := r.Cookie(nombreCookie)
@@ -239,7 +255,7 @@ func (a *app) protegerAPI(next http.Handler) http.Handler {
 		defer cancel()
 		var u usuario
 		var hash string
-		err = a.db.QueryRowContext(ctx, `SELECT id,nombre,email,rol,estado,password_hash FROM usuarios WHERE id=?`, s.UsuarioID).Scan(&u.ID, &u.Nombre, &u.Email, &u.Rol, &u.Estado, &hash)
+		err = a.db.QueryRowContext(ctx, `SELECT id,nombre,email,estado,password_hash FROM usuarios WHERE id=?`, s.UsuarioID).Scan(&u.ID, &u.Nombre, &u.Email, &u.Estado, &hash)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			errorInterno(w, r, err)
 			return
@@ -248,11 +264,21 @@ func (a *app) protegerAPI(next http.Handler) http.Handler {
 			escribirError(w, 401, "sesión inválida; inicie sesión")
 			return
 		}
-		if requierePropietario(r) && u.Rol != "propietario" {
-			escribirError(w, 403, "se requiere rol propietario")
+		// Sin caché: un cambio de roles o permisos aplica en la siguiente petición.
+		if u.permisos, err = permisosEfectivos(ctx, a.db, u.ID); err != nil {
+			errorInterno(w, r, err)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), usuarioCtx{}, u)))
+		if !declarada {
+			log.Printf("[%s] ruta sin permiso declarado: %s %s", idPeticion(r.Context()), r.Method, r.URL.Path)
+			escribirError(w, 403, "acceso denegado")
+			return
+		}
+		if permiso != accesoSesion && !u.tiene(permiso) {
+			escribirError(w, 403, "no tiene permiso para esta acción ("+permiso+")")
+			return
+		}
+		mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), usuarioCtx{}, u)))
 	})
 }
 
@@ -260,25 +286,28 @@ type usuarioEntrada struct {
 	Nombre   string `json:"nombre"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
-	Rol      string `json:"rol"`
 	Estado   string `json:"estado"`
 }
 
+// Los roles no se reciben aquí: se asignan con PUT /api/usuarios/{id}/roles,
+// que exige roles.asignar. Un usuario nuevo nace sin permisos (mínimo privilegio).
 func validarUsuario(in *usuarioEntrada, nuevo bool) bool {
 	in.Nombre = strings.TrimSpace(in.Nombre)
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
 	if in.Estado == "" {
 		in.Estado = "activo"
 	}
-	if in.Rol == "" {
-		in.Rol = "empleado"
-	}
-	return in.Nombre != "" && utf8.RuneCountInString(in.Nombre) <= 100 && emailValido(in.Email) && (in.Rol == "empleado" || in.Rol == "propietario") && (in.Estado == "activo" || in.Estado == "inactivo") && ((!nuevo && in.Password == "") || validarClave(in.Password))
+	return in.Nombre != "" && utf8.RuneCountInString(in.Nombre) <= 100 && emailValido(in.Email) && (in.Estado == "activo" || in.Estado == "inactivo") && ((!nuevo && in.Password == "") || validarClave(in.Password))
 }
 func (a *app) listarUsuarios(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := ctxConsulta(r)
 	defer cancel()
-	rows, err := a.db.QueryContext(ctx, `SELECT id,nombre,email,rol,estado FROM usuarios ORDER BY nombre,id`)
+	roles, err := rolesPorUsuario(ctx, a.db, 0)
+	if err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	rows, err := a.db.QueryContext(ctx, `SELECT id,nombre,email,estado FROM usuarios ORDER BY nombre,id`)
 	if err != nil {
 		errorInterno(w, r, err)
 		return
@@ -287,9 +316,13 @@ func (a *app) listarUsuarios(w http.ResponseWriter, r *http.Request) {
 	lista := []usuario{}
 	for rows.Next() {
 		var u usuario
-		if err := rows.Scan(&u.ID, &u.Nombre, &u.Email, &u.Rol, &u.Estado); err != nil {
+		if err := rows.Scan(&u.ID, &u.Nombre, &u.Email, &u.Estado); err != nil {
 			errorInterno(w, r, err)
 			return
+		}
+		u.Roles = roles[u.ID]
+		if u.Roles == nil {
+			u.Roles = []rolResumen{}
 		}
 		lista = append(lista, u)
 	}
@@ -321,8 +354,9 @@ func (a *app) guardarUsuario(w http.ResponseWriter, r *http.Request, nuevo bool)
 			return
 		}
 	}
-	if !nuevo && id == usuarioActual(r).ID && (in.Estado != "activo" || in.Rol != "propietario") {
-		escribirError(w, 409, "no puede desactivar su acceso ni quitarse el rol propietario")
+	actor := usuarioActual(r)
+	if !nuevo && id == actor.ID && in.Estado != "activo" {
+		escribirError(w, 409, "no puede desactivar su propio acceso")
 		return
 	}
 	var hash []byte
@@ -336,39 +370,87 @@ func (a *app) guardarUsuario(w http.ResponseWriter, r *http.Request, nuevo bool)
 	}
 	ctx, cancel := ctxConsulta(r)
 	defer cancel()
-	if nuevo {
-		res, err := a.db.ExecContext(ctx, `INSERT INTO usuarios(nombre,email,password_hash,rol,estado) VALUES(?,?,?,?,?)`, in.Nombre, in.Email, string(hash), in.Rol, in.Estado)
+	err = a.transaccion(ctx, func(tx *sql.Tx) error {
+		if nuevo {
+			res, err := tx.ExecContext(ctx, `INSERT INTO usuarios(nombre,email,password_hash,rol,estado) VALUES(?,?,?,'empleado',?)`, in.Nombre, in.Email, string(hash), in.Estado)
+			if err != nil {
+				return err
+			}
+			if id, err = res.LastInsertId(); err != nil {
+				return err
+			}
+			return registrarAuditoria(ctx, tx, actor, "usuario.crear", "usuario", id, map[string]any{"nombre": in.Nombre, "email": in.Email, "estado": in.Estado})
+		}
+		propietario, err := rolPropietarioBloqueado(ctx, tx)
 		if err != nil {
-			errorSQLCRUD(w, r, err, "el correo ya está registrado", "")
-			return
+			return err
 		}
-		id, err = res.LastInsertId()
+		var antes usuarioEntrada
+		err = tx.QueryRowContext(ctx, `SELECT nombre,email,estado FROM usuarios WHERE id=? FOR UPDATE`, id).Scan(&antes.Nombre, &antes.Email, &antes.Estado)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fallo(404, "usuario no encontrado")
+		}
 		if err != nil {
-			errorInterno(w, r, err)
-			return
+			return err
 		}
-	} else {
-		// La existencia no depende de RowsAffected: MySQL devuelve cero si no hay cambios.
-		var existe int
-		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM usuarios WHERE id=?`, id).Scan(&existe); err != nil {
-			errorInterno(w, r, err)
-			return
+		if id != actor.ID {
+			// Cambiar correo, clave o estado de alguien con más permisos permitiría suplantarlo.
+			roles, err := rolesDeUsuario(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			permisos, err := permisosDeRoles(ctx, tx, roles)
+			if err != nil {
+				return err
+			}
+			if f := faltantes(permisos, actor.permisos); len(f) > 0 {
+				return fallo(403, "no puede modificar a un usuario con permisos que usted no tiene: "+strings.Join(f, ", "))
+			}
+			if antes.Estado == "activo" && in.Estado != "activo" && slices.Contains(roles, propietario) {
+				n, err := otrosPropietariosActivos(ctx, tx, propietario, id)
+				if err != nil {
+					return err
+				}
+				if n == 0 {
+					return fallo(409, "debe quedar al menos un propietario activo")
+				}
+			}
 		}
-		if existe == 0 {
-			escribirError(w, 404, "usuario no encontrado")
-			return
+		if _, err = tx.ExecContext(ctx, `UPDATE usuarios SET nombre=?,email=?,estado=?,password_hash=CASE WHEN ?='' THEN password_hash ELSE ? END WHERE id=?`, in.Nombre, in.Email, in.Estado, string(hash), string(hash), id); err != nil {
+			return err
 		}
-		_, err = a.db.ExecContext(ctx, `UPDATE usuarios SET nombre=?,email=?,rol=?,estado=?,password_hash=CASE WHEN ?='' THEN password_hash ELSE ? END WHERE id=?`, in.Nombre, in.Email, in.Rol, in.Estado, string(hash), string(hash), id)
-		if err != nil {
-			errorSQLCRUD(w, r, err, "el correo ya está registrado", "")
-			return
+		cambios := map[string]any{}
+		for campo, par := range map[string][2]string{"nombre": {antes.Nombre, in.Nombre}, "email": {antes.Email, in.Email}, "estado": {antes.Estado, in.Estado}} {
+			if par[0] != par[1] {
+				cambios[campo] = par
+			}
 		}
+		if in.Password != "" {
+			cambios["contraseña"] = "cambiada"
+		}
+		if len(cambios) == 0 {
+			return nil
+		}
+		return registrarAuditoria(ctx, tx, actor, "usuario.editar", "usuario", id, cambios)
+	})
+	if err != nil {
+		responderFallo(w, r, err, "el correo ya está registrado", "")
+		return
+	}
+	roles, err := rolesPorUsuario(ctx, a.db, id)
+	if err != nil {
+		errorInterno(w, r, err)
+		return
 	}
 	codigo := 200
 	if nuevo {
 		codigo = 201
 	}
-	escribirJSON(w, codigo, usuario{id, in.Nombre, in.Email, in.Rol, in.Estado})
+	u := usuario{ID: id, Nombre: in.Nombre, Email: in.Email, Estado: in.Estado, Roles: roles[id]}
+	if u.Roles == nil {
+		u.Roles = []rolResumen{}
+	}
+	escribirJSON(w, codigo, u)
 }
 
 // Herramientas de consola: usan la conexión existente, sin usuarios o claves predeterminados.
@@ -399,14 +481,31 @@ func configurarAcceso(db *sql.DB, crear, restablecer string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if crear != "" {
-		var n int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM usuarios WHERE rol='propietario' AND estado='activo' AND password_hash LIKE '$2%'`).Scan(&n); err != nil {
-			return err
-		}
-		if n > 0 {
-			return fmt.Errorf("ya existe un propietario con acceso; use la administración de usuarios o -restablecer-clave")
-		}
-		_, err = db.ExecContext(ctx, `INSERT INTO usuarios(nombre,email,password_hash,rol,estado) VALUES('Propietario',?,?,'propietario','activo')`, email, string(hash))
+		err = (&app{db: db}).transaccion(ctx, func(tx *sql.Tx) error {
+			propietario, err := rolPropietarioBloqueado(ctx, tx)
+			if err != nil {
+				return err
+			}
+			n, err := otrosPropietariosActivos(ctx, tx, propietario, 0)
+			if err != nil {
+				return err
+			}
+			if n > 0 {
+				return fmt.Errorf("ya existe un propietario con acceso; use la administración de usuarios o -restablecer-clave")
+			}
+			res, err := tx.ExecContext(ctx, `INSERT INTO usuarios(nombre,email,password_hash,rol,estado) VALUES('Propietario',?,?,'propietario','activo')`, email, string(hash))
+			if err != nil {
+				return err
+			}
+			id, err := res.LastInsertId()
+			if err != nil {
+				return err
+			}
+			if _, err = tx.ExecContext(ctx, `INSERT INTO usuario_roles(usuario_id,rol_id) VALUES(?,?)`, id, propietario); err != nil {
+				return err
+			}
+			return registrarAuditoria(ctx, tx, usuario{}, "usuario.crear", "usuario", id, map[string]any{"email": email, "origen": "consola", "roles_agregados": []string{nombreRolPropietario}})
+		})
 	} else {
 		var res sql.Result
 		res, err = db.ExecContext(ctx, `UPDATE usuarios SET password_hash=? WHERE email=?`, string(hash), email)

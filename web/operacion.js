@@ -4,19 +4,31 @@ let usuarioSesion = null;
 let carrito = [];
 let productosVenta = [];
 
+// puede(...permisos): true si el usuario tiene alguno. Solo decide qué se muestra;
+// el servidor vuelve a validar cada permiso.
+function puede(...permisos) {
+  const propios = usuarioSesion?.permisos || [];
+  return permisos.some(p => propios.includes(p));
+}
+function aplicarPermisos() {
+  document.querySelectorAll('[data-permiso]').forEach(el => { el.hidden = !puede(...el.dataset.permiso.split(/\s+/)); });
+}
+
 function mostrarSesion(u) {
   usuarioSesion = u;
   $('#form-login').hidden = !!u;
   $('#sesion').hidden = !u;
   $('#aplicacion').hidden = !u;
-  $('#sesion-nombre').textContent = u ? `${u.nombre} (${u.rol})` : '';
-  document.querySelectorAll('[data-propietario]').forEach(el => { el.hidden = !u || u.rol !== 'propietario'; });
+  const roles = u && u.roles.length ? u.roles.map(r => r.nombre + (r.activo ? '' : ' [inactivo]')).join(', ') : 'sin roles';
+  $('#sesion-nombre').textContent = u ? `${u.nombre} (${roles})` : '';
+  aplicarPermisos();
   if (!u) {
     carrito = [];
     $('#carrito').replaceChildren();
     $('#ficha').replaceChildren();
     $('#reporte-lista').replaceChildren();
     $('#formularios-admin').replaceChildren();
+    ['#accesos-roles', '#accesos-usuarios', '#accesos-auditoria'].forEach(s => $(s).replaceChildren());
     $('#aviso-alertas').textContent = '';
     Object.keys(cargadas).forEach(k => delete cargadas[k]);
   }
@@ -56,17 +68,32 @@ async function iniciarOperacion() {
   });
   const r = await api('/api/sesion');
   if (r.ok) entrar(r.data);
-  setInterval(() => { if (usuarioSesion) actualizarAvisos(); }, 30000);
+  setInterval(() => { if (usuarioSesion) { recargarSesion(); actualizarAvisos(); } }, 30000);
 }
 function entrar(u) {
   mostrarSesion(u);
   Object.keys(cargadas).forEach(k => delete cargadas[k]);
-  // Cada acceso comienza en el catálogo; las pestañas del propietario se controlan también en el servidor.
+  // Cada acceso comienza en el catálogo o en la primera pestaña que permitan sus roles.
+  if (!u.permisos.length) $('#aviso-alertas').textContent = 'Su usuario no tiene roles con permisos. Pida a un administrador que le asigne un rol.';
   activarPestana('productos');
   verificarSalud();
   actualizarAvisos();
 }
+// recargarSesion vuelve a leer roles y permisos (por ejemplo, después de que un
+// administrador los cambie) sin cerrar la sesión.
+async function recargarSesion() {
+  if (!usuarioSesion) return;
+  const r = await api('/api/sesion');
+  if (!r.ok || !usuarioSesion) return;
+  const cambio = JSON.stringify(r.data.permisos) !== JSON.stringify(usuarioSesion.permisos) || JSON.stringify(r.data.roles) !== JSON.stringify(usuarioSesion.roles);
+  if (!cambio) return;
+  mostrarSesion(r.data);
+  Object.keys(cargadas).forEach(k => delete cargadas[k]);
+  activarPestana(location.hash.slice(1));
+  $('#aviso-alertas').textContent = 'Sus roles o permisos cambiaron; la pantalla se actualizó.';
+}
 async function actualizarAvisos() {
+  if (!puede('alertas.ver')) return;
   const [v, s] = await Promise.all([api('/api/alertas/vencimientos'), api('/api/alertas/stock-bajo')]);
   if (!usuarioSesion) return;
   $('#aviso-alertas').textContent = v.ok && s.ok
@@ -139,6 +166,9 @@ function prepararReportes() {
   const anterior = new Date(hoy); anterior.setDate(anterior.getDate() - 29);
   $('#form-reporte').elements.desde.value = co(anterior);
   $('#form-reporte').elements.hasta.value = co(hoy);
+  const tipo = $('#form-reporte').elements.tipo;
+  const primera = [...tipo.options].find(o => !o.hidden);
+  if (primera && tipo.selectedOptions[0]?.hidden) tipo.value = primera.value;
 }
 
 const CAMPOS_PRODUCTO = [
@@ -157,8 +187,8 @@ function armarAdministracion() {
     ['categorias', [['nombre', 'text', true]]],
     ['proveedores', [['nombre', 'text', true], ['telefono'], ['acepta_devolucion', 'checkbox']]],
     ['etiquetas', [['nombre', 'text', true], ['tipo', 'text', true, 'necesidad'], ['activa', 'checkbox', false, true]]],
-    ['usuarios', [['nombre', 'text', true], ['email', 'email', true], ['password', 'password'], ['rol', 'text', true, 'empleado'], ['estado', 'text', true, 'activo']]]
-  ];
+    ['usuarios', [['nombre', 'text', true], ['email', 'email', true], ['password', 'password'], ['estado', 'text', true, 'activo']]]
+  ].filter(([recurso]) => puede(recurso + '.crear', recurso + '.editar', recurso + '.eliminar') || (recurso === 'usuarios' && puede('usuarios.ver')));
   caja.replaceChildren(...recursos.map(([recurso, campos]) => {
     const form = h('form', { method: 'post' }, h('h3', {}, recurso));
     const id = h('input', { type: 'number', min: '1', name: 'id', placeholder: 'Vacío para crear' });
@@ -173,7 +203,8 @@ function armarAdministracion() {
       if (tipo === 'password') { campo.minLength = 12; campo.maxLength = 72; campo.autocomplete = 'new-password'; }
       form.append(h('label', {}, nombre === 'etiquetas' ? 'IDs de etiquetas separados por coma' : nombre, ' ', campo));
     });
-    const guardar = h('button', { type: 'submit' }, 'Guardar');
+    const guardar = h('button', { type: 'submit', hidden: !puede(recurso + '.crear', recurso + '.editar') }, 'Guardar');
+    if (recurso === 'usuarios') form.append(h('p', {}, h('small', {}, 'Un usuario nuevo no tiene permisos: asígnele roles en la pestaña «Roles y permisos».')));
     form.append(guardar,
       h('button', { type: 'button', onclick: () => cargarTabla('/api/' + recurso, lista) }, 'Listar'),
       h('button', { type: 'button', onclick: async () => {
@@ -187,7 +218,7 @@ function armarAdministracion() {
         for (const [nombre, tipo] of campos) { if (nombre === 'password') { form.elements[nombre].value = ''; continue; } if (tipo === 'checkbox') form.elements[nombre].checked = !!datos[nombre]; else form.elements[nombre].value = datos[nombre] ?? ''; }
         salida.textContent = 'Datos cargados. Edite y guarde.';
       } }, 'Cargar para editar'));
-    if (recurso !== 'usuarios') form.append(h('button', { type: 'button', onclick: async () => {
+    if (recurso !== 'usuarios' && puede(recurso + '.eliminar')) form.append(h('button', { type: 'button', onclick: async () => {
       if (!id.value) { salida.textContent = 'Indique el ID.'; return; }
       if (!window.confirm(`Eliminar ${recurso} #${id.value}${recurso === 'productos' ? ' (desactivar)' : ''}?`)) return;
       const r = await api('/api/' + recurso + '/' + id.value, { method: 'DELETE' });

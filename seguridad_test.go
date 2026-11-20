@@ -42,12 +42,18 @@ func TestAPISinSesion(t *testing.T) {
 	}
 }
 func TestPermisos(t *testing.T) {
-	for _, c := range []struct {
-		metodo, ruta string
-		owner        bool
-	}{{"POST", "/api/ventas", false}, {"POST", "/api/bajas", false}, {"POST", "/api/lotes", false}, {"PUT", "/api/lotes/1", true}, {"GET", "/api/reportes/ventas", true}, {"GET", "/api/usuarios", true}, {"POST", "/api/productos", true}, {"DELETE", "/api/categorias/1", true}, {"GET", "/api/productos", false}} {
-		if got := requierePropietario(httptest.NewRequest(c.metodo, c.ruta, nil)); got != c.owner {
-			t.Errorf("%v: %v", c, got)
+	mux := (&app{}).enrutador()
+	for _, c := range []struct{ metodo, ruta, permiso string }{
+		{"POST", "/api/ventas", "ventas.crear"}, {"POST", "/api/bajas", "bajas.crear"}, {"POST", "/api/lotes", "lotes.crear"},
+		{"PUT", "/api/lotes/1", "lotes.editar"}, {"GET", "/api/reportes/ventas", "reportes.ventas"}, {"GET", "/api/usuarios", "usuarios.ver"},
+		{"POST", "/api/productos", "productos.crear"}, {"DELETE", "/api/categorias/1", "categorias.eliminar"}, {"GET", "/api/productos", "productos.ver"},
+		{"HEAD", "/api/productos/3", "productos.ver"}, {"PUT", "/api/usuarios/2/roles", "roles.asignar"}, {"DELETE", "/api/roles/4", "roles.gestionar"},
+		{"GET", "/api/usuarios/2/permisos", "usuarios.ver"}, {"GET", "/api/auditoria", "auditoria.ver"},
+		{"POST", "/api/login", accesoPublico}, {"GET", "/api/sesion", accesoSesion}, {"GET", "/api/nada", accesoSesion}, {"PUT", "/api/ventas", accesoSesion},
+	} {
+		_, patron := mux.Handler(httptest.NewRequest(c.metodo, c.ruta, nil))
+		if got, ok := permisoDeRuta[patron]; !ok || got != c.permiso {
+			t.Errorf("%s %s (patrón %q) = %q; se esperaba %q", c.metodo, c.ruta, patron, got, c.permiso)
 		}
 	}
 }
