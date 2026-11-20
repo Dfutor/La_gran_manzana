@@ -1,0 +1,93 @@
+/* Sistema de diseño de La Gran Manzana: tokens.
+   Contraste verificado (WCAG AA, texto normal ≥ 4.5:1):
+   - #2E7D32 sobre blanco 5.1:1 · blanco sobre #2E7D32 5.1:1 · blanco sobre #1B5E20 7.9:1
+   - #1F2A22 sobre #F1F8F4 13.8:1 · #5B6B5F sobre blanco 5.7:1 y sobre #F1F8F4 5.2:1
+   - #C62828 sobre blanco 5.6:1 · #1565C0 sobre blanco 5.8:1 · #7A5200 sobre #FFF4D6 6.3:1
+   - Insignias: #1B5E20/#E3F1E6 6.7:1 · #C62828/#FDECEC 4.9:1 · #1565C0/#E7F0FB 5.0:1
+   #66BB6A y #F9A825 no alcanzan 4.5:1 con texto: se usan solo como acento o fondo. */
+
+@font-face {
+  font-family: 'Inter';
+  src: url('../fonts/inter-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Paleta */
+  --verde-800: #1B5E20;
+  --verde-700: #256B29;
+  --verde-600: #2E7D32;
+  --verde-400: #66BB6A;
+  --verde-200: #C8E6C9;
+  --verde-100: #E3F1E6;
+  --verde-50: #F1F8F4;
+
+  --color-primario: var(--verde-600);
+  --color-primario-hover: var(--verde-700);
+  --color-primario-oscuro: var(--verde-800);
+  --color-primario-claro: var(--verde-400);
+  --color-primario-suave: var(--verde-100);
+  --color-fondo: var(--verde-50);
+  --color-superficie: #FFFFFF;
+  --color-superficie-2: #F7FAF8;
+  --color-texto: #1F2A22;
+  --color-texto-2: #5B6B5F;
+  --color-borde: #D5E2D8;
+  --color-borde-fuerte: #A9BBAE;
+
+  --color-exito: #2E7D32;
+  --color-exito-fondo: #E3F1E6;
+  --color-advertencia: #F9A825;
+  --color-advertencia-texto: #7A5200;
+  --color-advertencia-fondo: #FFF4D6;
+  --color-error: #C62828;
+  --color-error-fondo: #FDECEC;
+  --color-info: #1565C0;
+  --color-info-fondo: #E7F0FB;
+
+  /* Tipografía */
+  --fuente: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --fuente-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --t-h1: 28px;
+  --t-h2: 22px;
+  --t-h3: 18px;
+  --t-cuerpo: 15px;
+  --t-cuerpo-peq: 14px;
+  --t-etiqueta: 13px;
+  --t-mini: 12px;
+  --lh: 1.5;
+
+  /* Espaciado (múltiplos de 8; 4 solo para ajustes finos) */
+  --e-05: 4px;
+  --e-1: 8px;
+  --e-2: 16px;
+  --e-3: 24px;
+  --e-4: 32px;
+  --e-5: 40px;
+  --e-6: 48px;
+  --e-8: 64px;
+
+  /* Radios y sombras */
+  --radio-s: 8px;
+  --radio: 12px;
+  --radio-l: 16px;
+  --radio-pildora: 999px;
+  --sombra-1: 0 1px 2px rgba(31, 42, 34, .06), 0 1px 3px rgba(31, 42, 34, .06);
+  --sombra-2: 0 4px 12px rgba(31, 42, 34, .08), 0 1px 3px rgba(31, 42, 34, .05);
+  --sombra-3: 0 16px 40px rgba(31, 42, 34, .16);
+
+  /* Foco visible */
+  --foco: 0 0 0 3px #FFFFFF, 0 0 0 5px var(--color-info);
+
+  /* Layout */
+  --lateral-ancho: 256px;
+  --encabezado-alto: 64px;
+  --contenido-max: 1280px;
+  --transicion: 160ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --transicion: 0ms; }
+}

@@ -1,6 +1,6 @@
 -- Control de acceso basado en roles (RBAC) para La Gran Manzana.
 --
--- Agrega cinco tablas; no modifica ni borra tablas o datos existentes y se puede
+-- Agrega siete tablas (control de acceso y recomendaciones del panel); no modifica ni borra tablas o datos existentes y se puede
 -- ejecutar varias veces (solo crea lo que falta). Requiere un usuario MySQL con
 -- CREATE y REFERENCES; el usuario de la aplicación sigue necesitando solo
 -- SELECT/INSERT/UPDATE/DELETE:
@@ -73,4 +73,32 @@ CREATE TABLE IF NOT EXISTS `auditoria_accesos` (
   KEY `idx_auditoria_entidad` (`entidad`,`entidad_id`),
   KEY `idx_auditoria_actor` (`actor_id`),
   CONSTRAINT `fk_auditoria_actor` FOREIGN KEY (`actor_id`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Permisos personalizados por usuario (overrides). Prioridad al evaluar:
+-- override del usuario > permisos de sus roles > denegado.
+CREATE TABLE IF NOT EXISTS `usuario_permisos` (
+  `usuario_id` int NOT NULL,
+  `permiso` varchar(60) NOT NULL,
+  `concedido` tinyint(1) NOT NULL,
+  `asignado_por` int DEFAULT NULL,
+  `fecha_asignacion` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`usuario_id`,`permiso`),
+  KEY `idx_usuario_permisos_permiso` (`permiso`),
+  KEY `idx_usuario_permisos_asignado_por` (`asignado_por`),
+  CONSTRAINT `fk_usuario_permisos_usuario` FOREIGN KEY (`usuario_id`) REFERENCES `usuarios` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_usuario_permisos_permiso` FOREIGN KEY (`permiso`) REFERENCES `permisos` (`nombre`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_usuario_permisos_asignado_por` FOREIGN KEY (`asignado_por`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Recomendaciones del panel aceptadas o descartadas. La clave describe la
+-- situación (lote+nivel o producto+stock): si cambia, la recomendación reaparece.
+CREATE TABLE IF NOT EXISTS `sugerencias_decisiones` (
+  `clave` varchar(80) NOT NULL,
+  `decision` enum('aceptada','descartada') NOT NULL,
+  `usuario_id` int DEFAULT NULL,
+  `fecha` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`clave`),
+  KEY `idx_sugerencias_usuario` (`usuario_id`),
+  CONSTRAINT `fk_sugerencias_usuario` FOREIGN KEY (`usuario_id`) REFERENCES `usuarios` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

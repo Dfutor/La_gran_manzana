@@ -84,7 +84,8 @@ var catalogoPermisos = []permisoDef{
 	{"bajas.ver", "Bajas", "Consultar las bajas propias", false},
 	{permBajasVerTodas, "Bajas", "Consultar las bajas de todos los usuarios", false},
 	{"bajas.crear", "Bajas", "Registrar bajas de inventario", false},
-	{"alertas.ver", "Alertas", "Consultar alertas de stock y vencimiento", false},
+	{"alertas.ver", "Alertas", "Consultar alertas y recomendaciones del panel", false},
+	{"alertas.decidir", "Alertas", "Aceptar o descartar recomendaciones del panel", false},
 	{"reportes.ventas", "Reportes", "Consultar el reporte de ventas", false},
 	{"reportes.perdidas", "Reportes", "Consultar el reporte de pérdidas", false},
 	{"reportes.rotacion", "Reportes", "Consultar el reporte de rotación y reposición", false},
@@ -93,7 +94,7 @@ var catalogoPermisos = []permisoDef{
 	{"usuarios.editar", "Usuarios", "Modificar datos, contraseña y estado de usuarios", true},
 	{"roles.ver", "Roles y permisos", "Consultar roles y el catálogo de permisos", false},
 	{"roles.gestionar", "Roles y permisos", "Crear, editar, desactivar y eliminar roles", true},
-	{"roles.asignar", "Roles y permisos", "Asignar o quitar roles a usuarios", true},
+	{"roles.asignar", "Roles y permisos", "Asignar roles y permisos personalizados a usuarios", true},
 	{"auditoria.ver", "Roles y permisos", "Consultar la auditoría de cambios de acceso", false},
 }
 
@@ -101,7 +102,7 @@ var catalogoPermisos = []permisoDef{
 var permisosEmpleado = []string{
 	"productos.ver", "recomendaciones.consultar", "categorias.ver", "proveedores.ver", "etiquetas.ver",
 	"lotes.ver", "lotes.crear", "ventas.ver", permVentasVerTodas, "ventas.crear",
-	"bajas.ver", permBajasVerTodas, "bajas.crear", "alertas.ver",
+	"bajas.ver", permBajasVerTodas, "bajas.crear", "alertas.ver", "alertas.decidir",
 }
 
 var indicePermisos = func() map[string]permisoDef {
@@ -262,10 +263,84 @@ func comoArgs(ids []int64) []any {
 
 // --- Motor de autorización ---
 
-// permisosEfectivos: unión de los permisos de los roles activos del usuario.
+// fuentesPermisos reúne, en una sola consulta, de dónde puede venir cada permiso
+// de un usuario: sus roles activos y sus overrides.
+type fuentesPermisos struct {
+	deRoles     map[string]bool
+	concedidos  map[string]bool
+	denegados   map[string]bool
+	propietario bool // tiene activo el rol del sistema
+}
+
+func leerFuentesPermisos(ctx context.Context, q consultor, usuarioID int64) (fuentesPermisos, error) {
+	f := fuentesPermisos{map[string]bool{}, map[string]bool{}, map[string]bool{}, false}
+	rows, err := q.QueryContext(ctx, `SELECT rp.permiso, IF(r.es_sistema=1,'sistema','rol') FROM usuario_roles ur JOIN roles r ON r.id=ur.rol_id AND r.activo=1 JOIN rol_permisos rp ON rp.rol_id=r.id WHERE ur.usuario_id=?
+UNION ALL SELECT permiso, IF(concedido=1,'concedido','denegado') FROM usuario_permisos WHERE usuario_id=?`, usuarioID, usuarioID)
+	if err != nil {
+		return f, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p, fuente string
+		if err := rows.Scan(&p, &fuente); err != nil {
+			return f, err
+		}
+		switch fuente {
+		case "sistema":
+			f.propietario = true
+			f.deRoles[p] = true
+		case "rol":
+			f.deRoles[p] = true
+		case "concedido":
+			f.concedidos[p] = true
+		case "denegado":
+			f.denegados[p] = true
+		}
+	}
+	return f, rows.Err()
+}
+
+// efectivos aplica la prioridad: override del usuario > permiso del rol > denegado.
+// El rol Propietario ignora las denegaciones: nunca se puede bloquear al administrador.
+func (f fuentesPermisos) efectivos() map[string]bool {
+	m := map[string]bool{}
+	for p := range f.deRoles {
+		m[p] = true
+	}
+	for p := range f.concedidos {
+		m[p] = true
+	}
+	if !f.propietario {
+		for p := range f.denegados {
+			delete(m, p)
+		}
+	}
+	return m
+}
+
+// permisosEfectivos: lo que el usuario puede hacer ahora mismo.
 func permisosEfectivos(ctx context.Context, q consultor, usuarioID int64) (map[string]bool, error) {
-	l, err := leerTextos(q.QueryContext(ctx, `SELECT DISTINCT rp.permiso FROM usuario_roles ur JOIN roles r ON r.id=ur.rol_id AND r.activo=1 JOIN rol_permisos rp ON rp.rol_id=r.id WHERE ur.usuario_id=?`, usuarioID))
-	return conjunto(l), err
+	f, err := leerFuentesPermisos(ctx, q, usuarioID)
+	return f.efectivos(), err
+}
+
+// permisosPotenciales: todo lo que el usuario podría tener (roles, incluso
+// inactivos, más permisos concedidos). Sirve para impedir que alguien con
+// menos acceso modifique a otro con más.
+func permisosPotenciales(ctx context.Context, q consultor, usuarioID int64) (map[string]bool, []int64, error) {
+	roles, err := rolesDeUsuario(ctx, q, usuarioID)
+	if err != nil {
+		return nil, nil, err
+	}
+	m, err := permisosDeRoles(ctx, q, roles)
+	if err != nil {
+		return nil, nil, err
+	}
+	concedidos, err := leerTextos(q.QueryContext(ctx, `SELECT permiso FROM usuario_permisos WHERE usuario_id=? AND concedido=1`, usuarioID))
+	for _, p := range concedidos {
+		m[p] = true
+	}
+	return m, roles, err
 }
 
 // permisosDeRoles incluye roles inactivos: sirve para decidir quién puede
@@ -348,18 +423,34 @@ func otrosPropietariosActivos(ctx context.Context, tx *sql.Tx, rolID, excluir in
 
 // --- Sincronización al iniciar ---
 
-var tablasRBAC = []string{"permisos", "roles", "rol_permisos", "usuario_roles", "auditoria_accesos"}
+var tablasRBAC = []string{"permisos", "roles", "rol_permisos", "usuario_roles", "auditoria_accesos", "usuario_permisos", "sugerencias_decisiones"}
+
+// verificarEsquema solo lee: confirma que existan las tablas que crea
+// docs/migracion_rbac.sql y que el usuario de la aplicación pueda verlas.
+func verificarEsquema(ctx context.Context, db *sql.DB) error {
+	presentes, err := leerTextos(db.QueryContext(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN (`+placeholders(len(tablasRBAC))+`)`, comoArgsTexto(tablasRBAC)...))
+	if err != nil {
+		return err
+	}
+	hay := conjunto(presentes)
+	var faltan []string
+	for _, t := range tablasRBAC {
+		if !hay[t] {
+			faltan = append(faltan, t)
+		}
+	}
+	if len(faltan) > 0 {
+		return fmt.Errorf("faltan las tablas %s: ejecute docs/migracion_rbac.sql con un usuario administrador de MySQL", strings.Join(faltan, ", "))
+	}
+	return nil
+}
 
 // iniciarRBAC comprueba las tablas, sincroniza el catálogo de permisos y
 // garantiza que el rol Propietario tenga todos. La primera vez (sin roles)
 // crea Propietario y Empleado y asigna a cada usuario según su columna rol.
 func iniciarRBAC(ctx context.Context, db *sql.DB) error {
-	var n int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN (`+placeholders(len(tablasRBAC))+`)`, comoArgsTexto(tablasRBAC)...).Scan(&n); err != nil {
+	if err := verificarEsquema(ctx, db); err != nil {
 		return err
-	}
-	if n != len(tablasRBAC) {
-		return fmt.Errorf("faltan las tablas de roles y permisos: ejecute docs/migracion_rbac.sql con un usuario administrador de MySQL")
 	}
 	a := &app{db: db}
 	return a.transaccion(ctx, func(tx *sql.Tx) error {
@@ -857,8 +948,15 @@ func (a *app) asignarRolesUsuario(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		concedidos, err := leerTextos(tx.QueryContext(ctx, `SELECT permiso FROM usuario_permisos WHERE usuario_id=? AND concedido=1`, id))
+		if err != nil {
+			return err
+		}
+		for _, p := range concedidos {
+			permisos[p] = true
+		}
 		if f := faltantes(permisos, actor.permisos); len(f) > 0 {
-			return fallo(403, "solo puede asignar o quitar roles con permisos que usted tiene; le faltan: "+strings.Join(f, ", "))
+			return fallo(403, "solo puede asignar o quitar roles a usuarios y con permisos que usted tiene; le faltan: "+strings.Join(f, ", "))
 		}
 		teniaPropietario, tendraPropietario := slices.Contains(anteriores, propietario), slices.Contains(nuevos, propietario)
 		if teniaPropietario && !tendraPropietario && estado == "activo" {
@@ -924,9 +1022,21 @@ func (a *app) asignarRolesUsuario(w http.ResponseWriter, r *http.Request) {
 type permisoEfectivo struct {
 	permisoDef
 	Roles []string `json:"roles"`
+	// Origen: "rol" (heredado) o "personalizado" (override concedido).
+	Origen string `json:"origen"`
 }
 
-// permisosUsuario muestra los permisos efectivos de un usuario y de qué roles provienen.
+// permisoDetalle describe cada permiso del catálogo para un usuario.
+type permisoDetalle struct {
+	permisoDef
+	Roles    []string `json:"roles"`    // roles activos que lo otorgan
+	Heredado bool     `json:"heredado"` // valor base según los roles
+	Override string   `json:"override"` // "", "concedido" o "denegado"
+	Efectivo bool     `json:"efectivo"`
+}
+
+// permisosUsuario muestra roles, overrides y permisos efectivos de un usuario,
+// con el origen de cada permiso.
 func (a *app) permisosUsuario(w http.ResponseWriter, r *http.Request) {
 	id, ok := idDeRuta(r)
 	if !ok {
@@ -969,17 +1079,194 @@ func (a *app) permisosUsuario(w http.ResponseWriter, r *http.Request) {
 		errorInterno(w, r, err)
 		return
 	}
+	fuentes, err := leerFuentesPermisos(ctx, a.db, id)
+	if err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	finales := fuentes.efectivos()
 	efectivos := []permisoEfectivo{}
+	detalle := []permisoDetalle{}
+	overrides := []map[string]any{}
 	for _, def := range catalogoPermisos {
-		if rs, ok := origen[def.Nombre]; ok {
-			efectivos = append(efectivos, permisoEfectivo{def, rs})
+		rs := origen[def.Nombre]
+		if rs == nil {
+			rs = []string{}
+		}
+		d := permisoDetalle{permisoDef: def, Roles: rs, Heredado: fuentes.deRoles[def.Nombre], Efectivo: finales[def.Nombre]}
+		switch {
+		case fuentes.concedidos[def.Nombre]:
+			d.Override = "concedido"
+		case fuentes.denegados[def.Nombre]:
+			d.Override = "denegado"
+		}
+		if d.Override != "" {
+			overrides = append(overrides, map[string]any{"permiso": def.Nombre, "concedido": d.Override == "concedido"})
+		}
+		detalle = append(detalle, d)
+		if d.Efectivo {
+			o := "rol"
+			if !d.Heredado {
+				o = "personalizado"
+			}
+			efectivos = append(efectivos, permisoEfectivo{def, rs, o})
 		}
 	}
 	lista := roles[id]
 	if lista == nil {
 		lista = []rolResumen{}
 	}
-	escribirJSON(w, 200, map[string]any{"usuario": u, "activo": u.Estado == "activo", "roles": lista, "permisos": efectivos})
+	escribirJSON(w, 200, map[string]any{
+		"usuario": u, "activo": u.Estado == "activo", "es_propietario": fuentes.propietario,
+		"roles": lista, "permisos": efectivos, "detalle": detalle, "overrides": overrides,
+	})
+}
+
+type overrideEntrada struct {
+	Permiso   string `json:"permiso"`
+	Concedido *bool  `json:"concedido"`
+}
+
+func validarOverrides(l []overrideEntrada) (map[string]bool, string) {
+	if l == nil {
+		return nil, "overrides es obligatorio (lista; vacía restablece todo al rol)"
+	}
+	if len(l) > maxPermisosRol {
+		return nil, fmt.Sprintf("máximo %d permisos personalizados", maxPermisosRol)
+	}
+	m := map[string]bool{}
+	for _, o := range l {
+		if _, ok := indicePermisos[o.Permiso]; !ok {
+			return nil, fmt.Sprintf("permiso desconocido: %q", o.Permiso)
+		}
+		if o.Concedido == nil {
+			return nil, "cada permiso personalizado necesita concedido: true o false"
+		}
+		if _, repetido := m[o.Permiso]; repetido {
+			return nil, fmt.Sprintf("permiso repetido: %q", o.Permiso)
+		}
+		m[o.Permiso] = *o.Concedido
+	}
+	return m, ""
+}
+
+// PUT /api/usuarios/{id}/permisos {overrides:[{permiso,concedido}]} reemplaza los
+// permisos personalizados del usuario. Lo que no aparece vuelve al valor del rol.
+func (a *app) asignarPermisosUsuario(w http.ResponseWriter, r *http.Request) {
+	id, ok := idDeRuta(r)
+	if !ok {
+		escribirError(w, 400, "id inválido")
+		return
+	}
+	var in struct {
+		Overrides []overrideEntrada `json:"overrides"`
+	}
+	if !decodificarJSON(w, r, &in) {
+		return
+	}
+	nuevos, problema := validarOverrides(in.Overrides)
+	if problema != "" {
+		escribirError(w, 400, problema)
+		return
+	}
+	actor := usuarioActual(r)
+	if id == actor.ID {
+		escribirError(w, 409, "no puede modificar sus propios permisos; pídaselo a otro administrador")
+		return
+	}
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	err := a.transaccion(ctx, func(tx *sql.Tx) error {
+		var estado string
+		err := tx.QueryRowContext(ctx, `SELECT estado FROM usuarios WHERE id=? FOR UPDATE`, id).Scan(&estado)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fallo(404, "usuario no encontrado")
+		}
+		if err != nil {
+			return err
+		}
+		potenciales, _, err := permisosPotenciales(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if f := faltantes(potenciales, actor.permisos); len(f) > 0 {
+			return fallo(403, "no puede modificar a un usuario con permisos que usted no tiene: "+strings.Join(f, ", "))
+		}
+		fuentes, err := leerFuentesPermisos(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		anteriores := map[string]bool{}
+		for p := range fuentes.concedidos {
+			anteriores[p] = true
+		}
+		for p := range fuentes.denegados {
+			anteriores[p] = false
+		}
+		tocados := map[string]bool{}
+		for p := range anteriores {
+			tocados[p] = true
+		}
+		for p := range nuevos {
+			tocados[p] = true
+		}
+		if f := faltantes(tocados, actor.permisos); len(f) > 0 {
+			return fallo(403, "solo puede personalizar permisos que usted tiene; le faltan: "+strings.Join(f, ", "))
+		}
+		if fuentes.propietario {
+			for p, concedido := range nuevos {
+				if !concedido {
+					return fallo(409, "el rol Propietario tiene acceso total: no admite permisos denegados ("+p+")")
+				}
+			}
+		}
+		if _, err = tx.ExecContext(ctx, `DELETE FROM usuario_permisos WHERE usuario_id=?`, id); err != nil {
+			return err
+		}
+		if len(nuevos) > 0 {
+			args := []any{}
+			for _, p := range ordenados(tocados) {
+				if concedido, ok := nuevos[p]; ok {
+					args = append(args, id, p, concedido, actor.ID)
+				}
+			}
+			if _, err = tx.ExecContext(ctx, `INSERT INTO usuario_permisos(usuario_id,permiso,concedido,asignado_por) VALUES `+strings.TrimSuffix(strings.Repeat("(?,?,?,?),", len(nuevos)), ","), args...); err != nil {
+				return err
+			}
+		}
+		cambios := map[string]any{}
+		var concedidos, denegados, restablecidos []string
+		for _, p := range ordenados(tocados) {
+			antes, teniaAntes := anteriores[p]
+			ahora, tieneAhora := nuevos[p]
+			switch {
+			case teniaAntes && !tieneAhora:
+				restablecidos = append(restablecidos, p)
+			case tieneAhora && (!teniaAntes || antes != ahora) && ahora:
+				concedidos = append(concedidos, p)
+			case tieneAhora && (!teniaAntes || antes != ahora):
+				denegados = append(denegados, p)
+			}
+		}
+		if len(concedidos) > 0 {
+			cambios["permisos_concedidos"] = concedidos
+		}
+		if len(denegados) > 0 {
+			cambios["permisos_denegados"] = denegados
+		}
+		if len(restablecidos) > 0 {
+			cambios["restablecidos_al_rol"] = restablecidos
+		}
+		if len(cambios) == 0 {
+			return nil
+		}
+		return registrarAuditoria(ctx, tx, actor, "usuario.permisos", "usuario", id, cambios)
+	})
+	if err != nil {
+		responderFallo(w, r, err, "", "")
+		return
+	}
+	a.permisosUsuario(w, r)
 }
 
 func (a *app) listarAuditoria(w http.ResponseWriter, r *http.Request) {

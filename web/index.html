@@ -3,175 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="/granmanzana/">
   <title>La Gran Manzana</title>
-  <link rel="stylesheet" href="estilos.css">
+  <meta name="description" content="La Gran Manzana: sistema interno de la tienda naturista para ventas, inventario por lotes FEFO y atención orientada.">
+  <meta name="theme-color" content="#1B5E20">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232E7D32'/%3E%3Cpath d='M16 11c-2-2-7-2-8 3s2 11 5 11c1.2 0 1.8-.6 3-.6s1.8.6 3 .6c3 0 6-6 5-11s-6-5-8-3z' fill='white'/%3E%3Cpath d='M16 11c0-2 1-4 3-5' stroke='white' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/componentes.css">
+  <link rel="stylesheet" href="css/paginas.css">
 </head>
 <body>
-  <h1>La Gran Manzana</h1>
-  <form id="form-login" method="post" action="/api/login">
-    <label>Correo <input name="email" type="email" autocomplete="username" required></label>
-    <label>Contraseña <input name="password" type="password" autocomplete="current-password" required maxlength="72"></label>
-    <button>Ingresar</button><p id="login-msg" role="status"></p>
-  </form>
-  <p id="sesion" hidden><span id="sesion-nombre"></span> <button id="salir">Cerrar sesión</button></p>
-  <div id="aplicacion" hidden>
-  <p id="aviso-alertas" role="status" aria-live="polite"></p>
-  <p>Estado: <span id="estado">verificando…</span></p>
-
-  <!-- data-permiso: el elemento se muestra si el usuario tiene alguno de esos permisos.
-       Es solo comodidad visual: el servidor valida cada permiso en el API. -->
-  <nav id="pestanas">
-    <button data-tab="productos" data-permiso="productos.ver">Productos</button>
-    <button data-tab="necesidades" data-permiso="recomendaciones.consultar">¿Qué necesita el cliente?</button>
-    <button data-tab="alertas" data-permiso="alertas.ver">Alertas</button>
-    <button data-tab="categorias" data-permiso="categorias.ver">Categorías</button>
-    <button data-tab="ventas" data-permiso="ventas.crear ventas.ver">Ventas</button>
-    <button data-tab="inventario" data-permiso="lotes.ver lotes.crear lotes.editar bajas.ver bajas.crear">Lotes y bajas</button>
-    <button data-tab="administracion" data-permiso="productos.crear productos.editar productos.eliminar categorias.crear categorias.editar categorias.eliminar proveedores.crear proveedores.editar proveedores.eliminar etiquetas.crear etiquetas.editar etiquetas.eliminar usuarios.ver usuarios.crear usuarios.editar">Administración</button>
-    <button data-tab="accesos" data-permiso="roles.ver usuarios.ver auditoria.ver">Roles y permisos</button>
-    <button data-tab="reportes" data-permiso="reportes.ventas reportes.perdidas reportes.rotacion">Reportes</button>
-    <button data-tab="probador">Probador de API</button>
-  </nav>
-  <hr>
-
-  <section id="tab-productos" class="panel">
-    <form id="form-buscar">
-      <input id="q" type="search" placeholder="Nombre, marca o código de barras" aria-label="Buscar">
-      <button type="submit">Buscar</button>
-    </form>
-    <p class="msg" id="productos-msg"></p>
-    <div class="scroll">
-      <table>
-        <thead><tr><th>Nombre</th><th>Marca</th><th>Presentación</th><th>Categoría</th><th>Precio</th><th>Stock</th></tr></thead>
-        <tbody id="productos-cuerpo"></tbody>
-      </table>
-    </div>
-    <p><small>Clic en un producto para ver su ficha. En rojo: stock en o por debajo del mínimo.</small></p>
-    <div id="ficha"></div>
-  </section>
-
-  <section id="tab-necesidades" class="panel" hidden>
-    <p>1. Necesidad del cliente:</p>
-    <div id="necesidades-botones"></div>
-    <p>2. Evitar productos con (opcional):</p>
-    <div id="contra-opciones"></div>
-    <label><input type="checkbox" id="solo-disponibles"> Solo con existencias</label>
-    <p class="msg" id="necesidades-msg"></p>
-    <div id="necesidades-resultado"></div>
-  </section>
-
-  <section id="tab-alertas" class="panel" hidden>
-    <h2>Vencimientos</h2>
-    <p class="msg" id="venc-msg"></p>
-    <div class="scroll">
-      <table>
-        <thead><tr><th>Nivel</th><th>Producto</th><th>Lote</th><th>Vence</th><th>Días</th><th>Cant.</th><th>Valor en riesgo</th><th>Acción sugerida</th></tr></thead>
-        <tbody id="venc-cuerpo"></tbody>
-      </table>
-    </div>
-    <h2>Stock bajo</h2>
-    <p class="msg" id="stock-msg"></p>
-    <div class="scroll">
-      <table>
-        <thead><tr><th>Producto</th><th>Categoría</th><th>Stock</th><th>Mínimo</th><th>Faltan</th></tr></thead>
-        <tbody id="stock-cuerpo"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section id="tab-categorias" class="panel" hidden>
-    <form id="form-categoria" data-permiso="categorias.crear">
-      <input id="cat-nombre" type="text" placeholder="Nueva categoría (máx. 80)" aria-label="Nombre">
-      <button type="submit">Crear</button>
-    </form>
-    <p class="msg" id="cat-resultado"></p>
-    <ul id="cat-lista"></ul>
-  </section>
-
-  <section id="tab-ventas" class="panel" hidden>
-    <h2 data-permiso="ventas.crear">Registrar venta</h2>
-    <p data-permiso="ventas.crear">En productos a granel una unidad representa 100 g. El sistema selecciona los lotes FEFO y excluye los vencidos.</p>
-    <form id="form-venta" data-permiso="ventas.crear">
-      <label>Producto <select id="venta-producto" required></select></label>
-      <label>Cantidad <input id="venta-cantidad" type="number" min="1" max="1000000" value="1" required></label>
-      <label>Precio unitario de oferta (opcional) <input id="venta-precio" type="number" min="0" step="0.01"></label>
-      <button type="button" id="agregar-venta">Agregar al carrito</button>
-      <ul id="carrito"></ul>
-      <label>Medio de pago <select id="medio-pago"><option>efectivo</option><option>nequi</option><option>daviplata</option></select></label>
-      <button id="guardar-venta">Guardar venta</button>
-    </form>
-    <p id="venta-msg" role="status"></p>
-    <button id="historial-ventas" data-permiso="ventas.ver">Consultar ventas de los últimos 30 días</button>
-    <div id="ventas-lista" class="scroll"></div>
-  </section>
-
-  <section id="tab-inventario" class="panel" hidden>
-    <h2 data-permiso="lotes.crear">Ingreso de lote</h2>
-    <form id="form-lote" data-permiso="lotes.crear">
-      <label>Producto <select name="producto_id" class="selector-producto" required></select></label>
-      <label>Código del lote <input name="codigo_lote" maxlength="60"></label>
-      <label>Factura <input name="numero_factura" maxlength="50"></label>
-      <label>Vencimiento <input name="fecha_vencimiento" type="date" required></label>
-      <label>Cantidad (unidades de 100 g para granel) <input name="cantidad" type="number" min="1" max="1000000" required></label>
-      <label>Costo por unidad <input name="costo_unitario" type="number" min="0" step="0.01" required></label>
-      <button>Guardar ingreso</button><p class="resultado" role="status"></p>
-    </form>
-    <h2 data-permiso="lotes.ver">Consultar lotes</h2>
-    <form id="form-lotes-buscar" data-permiso="lotes.ver"><label>Producto <select id="lotes-producto" class="selector-producto"></select></label><button>Consultar</button></form>
-    <div id="lotes-lista" class="scroll"></div>
-    <form id="form-editar-lote" data-permiso="lotes.editar">
-      <h3>Corregir datos de un lote</h3>
-      <label>ID lote <input name="id" type="number" min="1" required></label>
-      <label>Código <input name="codigo_lote" maxlength="60"></label>
-      <label>Factura <input name="numero_factura" maxlength="50"></label>
-      <label>Vencimiento <input name="fecha_vencimiento" type="date" required></label>
-      <button>Actualizar lote</button><p class="resultado" role="status"></p>
-    </form>
-    <h2 data-permiso="bajas.crear">Registrar baja</h2>
-    <form id="form-baja" data-permiso="bajas.crear">
-      <label>ID lote <input name="lote_id" type="number" min="1" required></label>
-      <label>Cantidad <input name="cantidad" type="number" min="1" max="1000000" required></label>
-      <label>Motivo <select name="motivo"><option>vencimiento</option><option>deterioro</option><option>obsequio</option><option>devolucion</option><option>otro</option></select></label>
-      <label>Acción previa <select name="accion_previa"><option>ninguna</option><option>venta_destacada</option><option>rebaja</option><option>combo</option><option>devolucion_distribuidor</option><option>obsequio</option></select></label>
-      <button>Guardar baja</button><p class="resultado" role="status"></p>
-    </form>
-    <button id="historial-bajas" data-permiso="bajas.ver">Consultar bajas de los últimos 30 días</button><div id="bajas-lista" class="scroll"></div>
-  </section>
-
-  <section id="tab-administracion" class="panel" hidden>
-    <h2>Catálogo y usuarios</h2>
-    <p>Para editar, consulta el registro y completa sus datos. Eliminar un producto lo desactiva y conserva el historial.</p>
-    <div id="formularios-admin"></div>
-  </section>
-
-  <section id="tab-accesos" class="panel" hidden>
-    <h2>Roles y permisos</h2>
-    <p>Un rol agrupa permisos; cada usuario recibe la suma de los permisos de sus roles activos. Los cambios aplican en la siguiente acción del usuario, sin cerrar su sesión. Solo puede otorgar, quitar o editar permisos que usted también tiene, y no puede cambiar sus propios roles.</p>
-    <div id="accesos-roles" data-permiso="roles.ver"></div>
-    <div id="accesos-usuarios" data-permiso="usuarios.ver"></div>
-    <div id="accesos-auditoria" data-permiso="auditoria.ver"></div>
-  </section>
-
-  <section id="tab-reportes" class="panel" hidden>
-    <h2>Reportes</h2>
-    <form id="form-reporte">
-      <label>Desde <input name="desde" type="date" required></label>
-      <label>Hasta <input name="hasta" type="date" required></label>
-      <label>Reporte <select name="tipo"><option value="ventas" data-permiso="reportes.ventas">Ventas por día y pago</option><option value="ventas?agrupar=producto" data-permiso="reportes.ventas">Productos más vendidos</option><option value="perdidas" data-permiso="reportes.perdidas">Pérdidas y acciones previas</option><option value="rotacion" data-permiso="reportes.rotacion">Rotación y reposición</option></select></label>
-      <button>Consultar</button>
-    </form>
-    <p>Reposición: estimación de 30 días según las ventas del periodo y el stock vigente actual. Sin movimiento significa que no hubo ventas en el periodo.</p>
-    <div id="reporte-lista" class="scroll"></div>
-  </section>
-
-  <section id="tab-probador" class="panel" hidden>
-    <p><small>Edita la ruta o el cuerpo y pulsa Enviar.</small></p>
-    <div id="probador-lista"></div>
-  </section>
-
+  <a class="saltar" href="#contenido">Saltar al contenido</a>
+  <div id="raiz" aria-live="off">
+    <div style="min-height:100vh;display:grid;place-items:center;color:#5B6B5F" role="status">Cargando La Gran Manzana…</div>
   </div>
-  <script src="app.js"></script>
-  <script src="operacion.js"></script>
-  <script src="roles.js"></script>
+  <div id="avisos" class="avisos" role="status" aria-live="polite"></div>
+  <noscript><p style="padding:24px">La Gran Manzana necesita JavaScript habilitado.</p></noscript>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 # La Gran Manzana
 
-Aplicación Go + MySQL 8/InnoDB para inventario por lotes FEFO, ventas y consulta orientativa de productos naturistas. HTML/CSS/JS básicos, sin frameworks ni CDN; todo se incluye en un binario. Usa la conexión y las diez tablas existentes más cinco tablas de control de acceso que se crean una sola vez con [docs/migracion_rbac.sql](docs/migracion_rbac.sql); no carga datos de ejemplo en producción.
+Aplicación Go + MySQL 8/InnoDB para inventario por lotes FEFO, ventas y consulta orientativa de productos naturistas. Interfaz HTML/CSS/JS sin frameworks ni CDN (landing, logins de usuario y administrador, panel y módulos; ver [docs/DISENO.md](docs/DISENO.md)); todo se incluye en un binario. Usa la conexión y las diez tablas existentes más siete tablas de control de acceso y recomendaciones que crea [docs/migracion_rbac.sql](docs/migracion_rbac.sql); no carga datos de ejemplo en producción.
 
 ## Servicios y descripción técnica
 
@@ -20,10 +20,11 @@ Todas las rutas usan JSON UTF-8 bajo `/api`. Salvo salud, login y logout, requie
 | FEFO | `GET /productos/{id}/plan-fefo?cantidad=N`, `productos.ver` | Simula asignación por vencimiento e ID; excluye agotados/vencidos. Stock insuficiente: 409. |
 | Ventas | `GET /ventas`, `GET /ventas/{id}`, `ventas.ver`; `POST /ventas`, `ventas.crear` | Sin `ventas.ver_todas` solo se consultan las ventas propias. Efectivo/Nequi/Daviplata; transacción con `SELECT FOR UPDATE`, consume uno o varios lotes FEFO y guarda encabezado/detalles. Calcula total en centavos exactos; permite precio de oferta; conserva precio histórico. Error: rollback completo. Usuario tomado de la sesión. |
 | Bajas | `GET /bajas`, `bajas.ver`; `POST /bajas`, `bajas.crear` | Sin `bajas.ver_todas` solo se consultan las bajas propias. Vencimiento, deterioro, obsequio, devolución u otro; guarda acción previa/costo/usuario y descuenta el lote bajo bloqueo transaccional. Valor perdido generado por MySQL. |
-| Alertas | `GET /alertas/stock-bajo`, `/alertas/vencimientos`, `alertas.ver` | Stock vigente ≤ mínimo; vencido/liquidar/devolver según umbrales del producto y proveedor. Proceso automático cada minuto registra cambios en journald; aviso global del navegador cada 30 s. No envía correo/SMS. |
+| Alertas | `GET /alertas/stock-bajo`, `/alertas/vencimientos`, `alertas.ver` | Stock vigente ≤ mínimo; vencido/liquidar/devolver según umbrales del producto y proveedor. Proceso automático cada minuto registra cambios en journald. No envía correo/SMS. |
+| Recomendaciones del panel | `GET /sugerencias`, `alertas.ver`; `POST /sugerencias/decision`, `alertas.decidir` | Derivadas de las alertas (retirar vencido, liquidar, devolver o destacar, reponer) con prioridad, motivo y acción. Aceptar o descartar se guarda para todo el equipo; si la situación cambia, la recomendación reaparece. |
 | Reportes | `GET /reportes/ventas[?agrupar=producto]`, `/reportes/perdidas`, `/reportes/rotacion`; `reportes.ventas/perdidas/rotacion` | Ventas por día/pago o producto; pérdidas por motivo/acción; unidades, promedio diario, cobertura y reposición estimada a 30 días. Incluye productos sin ventas; no presupone stock histórico. |
-| Roles y permisos | `GET /permisos`, `GET /roles[/{id}]`, `roles.ver`; `POST/PUT/DELETE /roles[/{id}]`, `roles.gestionar`; `PUT /usuarios/{id}/roles`, `roles.asignar`; `GET /auditoria`, `auditoria.ver` | Roles dinámicos con permisos del catálogo, asignación múltiple, permisos efectivos con su origen y auditoría. Ver la sección siguiente. |
-| Interfaz y documentación | `/granmanzana/`; `/granmanzana/docs/` | Formularios y tablas básicos con login; cada pestaña y formulario se muestra según los permisos del usuario. Docs y Postman conservan HTTP Basic independiente (`DOCS_USER/PASS`). |
+| Roles y permisos | `GET /permisos`, `GET /roles[/{id}]`, `roles.ver`; `POST/PUT/DELETE /roles[/{id}]`, `roles.gestionar`; `PUT /usuarios/{id}/roles` y `PUT /usuarios/{id}/permisos`, `roles.asignar`; `GET /auditoria`, `auditoria.ver` | Roles dinámicos con permisos del catálogo, asignación múltiple, permisos personalizados por usuario, permisos efectivos con su origen y auditoría. Ver la sección siguiente. |
+| Interfaz y documentación | `/granmanzana/` (landing), `/login`, `/admin/login`, `/app/…`, `/admin/…`; `/granmanzana/docs/` | Panel con recomendaciones, módulos y administración (matriz de permisos, usuarios, auditoría). Solo se muestran los módulos permitidos. Diseño en [docs/DISENO.md](docs/DISENO.md). Docs y Postman conservan HTTP Basic independiente (`DOCS_USER/PASS`). |
 
 Listas de lotes/ventas/bajas: `limite=1..500` (100 por defecto), `offset>=0`. Ventas, bajas y reportes: `desde=AAAA-MM-DD&hasta=AAAA-MM-DD` inclusivos; por defecto últimos 30 días, máximo 367 días. Granel: una unidad equivale a **100 g**, conforme al esquema INT actual. Reposición estimada = `max(mínimo, ceil(promedio_diario × 30)) − stock_vigente`, mínimo cero. Pérdidas suma todas las bajas por separado, incluidas devoluciones y obsequios.
 
@@ -34,6 +35,7 @@ Control de acceso basado en roles (RBAC) configurable desde **Roles y permisos**
 - **Catálogo de permisos** (`rbac.go`): 37 acciones `modulo.accion` que el backend protege. Vive en el código porque cada permiso necesita código que lo verifique; al iniciar se sincroniza con la tabla `permisos`. Agregar un permiso es un cambio de código; crear o modificar roles no.
 - **Roles**: se crean, editan, desactivan, duplican y eliminan sin desplegar. `Propietario` es del sistema: recibe automáticamente todos los permisos y no se edita ni elimina. `Empleado` se crea la primera vez con el mismo acceso que tenía el rol fijo anterior y luego es editable.
 - **Usuarios**: pueden tener varios roles; reciben la unión de los permisos de sus roles activos. Un usuario nuevo nace sin roles (mínimo privilegio).
+- **Permisos personalizados**: un administrador puede conceder o denegar un permiso a una persona concreta. Prioridad: personalizado > rol > denegado. Al rol Propietario no se le puede denegar nada, para que el sistema nunca quede sin administrador.
 - **Motor de autorización**: cada ruta declara su permiso en `rutasAPI` (`main.go`); una ruta `/api/` sin permiso declarado se niega. Los permisos se leen de MySQL en cada petición, sin caché: un cambio aplica en la siguiente solicitud sin cerrar sesión, y quitar un rol revoca el acceso de inmediato.
 - **Alcance**: `ventas.ver`/`bajas.ver` muestran solo los registros propios; `ventas.ver_todas`/`bajas.ver_todas` muestran los de todos. La tienda tiene una sede; un alcance por sucursal se agregaría igual cuando exista esa información en el esquema.
 - **Administración de privilegios** (validada en el servidor, en transacción): nadie otorga, quita ni edita permisos que no tiene; nadie cambia sus propios roles ni edita o elimina un rol que tiene asignado; nadie modifica (correo, clave, estado, roles) a un usuario con permisos que él no tiene; siempre queda al menos un propietario activo; un rol asignado no se puede eliminar (se quita o se desactiva). Los permisos `usuarios.crear`, `usuarios.editar`, `roles.gestionar` y `roles.asignar` se marcan como críticos en la interfaz.
@@ -87,12 +89,15 @@ git status --short
 mkdir -p ~/respaldos
 mysqldump --no-tablespaces --single-transaction Azure_makina > ~/respaldos/Azure_makina_$(date +%Y%m%d_%H%M%S).sql
 git pull --ff-only origin main
-# Solo la primera vez que se despliega RBAC (idempotente; usa una cuenta MySQL con CREATE/REFERENCES):
+# Migración idempotente: ejecútela en cada despliegue que la cambie (solo crea lo que falta).
+# Requiere una cuenta con CREATE/REFERENCES; en Ubuntu suele servir: sudo mysql --defaults-file=/etc/mysql/debian.cnf
 mysql -u <administrador> -p Azure_makina < docs/migracion_rbac.sql
 /usr/local/go/bin/go mod download
 /usr/local/go/bin/go test ./...
 /usr/local/go/bin/go vet ./...
 /usr/local/go/bin/go build -trimpath -o granmanzana-api.new .
+# Comprueba conexión y tablas ANTES de reemplazar el binario; si falla, no siga:
+./granmanzana-api.new -verificar
 # Conservar el binario anterior y reemplazarlo solo cuando la compilación pase:
 cp -p granmanzana-api granmanzana-api.previous
 mv granmanzana-api.new granmanzana-api

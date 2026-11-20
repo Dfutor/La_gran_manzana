@@ -1495,34 +1495,28 @@ WHERE p.activo = 1 AND pe.etiqueta_id = ?`
 
 // --- Handlers: alertas ---
 
-// GET /api/alertas/stock-bajo
-func (a *app) alertasStockBajo(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := ctxConsulta(r)
-	defer cancel()
+// consultarStockBajo: productos activos con stock vigente en o bajo el mínimo.
+func (a *app) consultarStockBajo(ctx context.Context) ([]alertaStock, error) {
 	rows, err := a.db.QueryContext(ctx, selectProductoResumen+`
 WHERE p.activo = 1`+agruparProductoResumen+`
 HAVING stock <= p.stock_minimo
 ORDER BY stock, p.nombre, p.id`)
 	if err != nil {
-		errorInterno(w, r, err)
-		return
+		return nil, err
 	}
 	productos, err := escanearProductos(rows)
 	if err != nil {
-		errorInterno(w, r, err)
-		return
+		return nil, err
 	}
 	lista := make([]alertaStock, 0, len(productos))
 	for _, p := range productos {
 		lista = append(lista, alertaStock{productoResumen: p, FaltanteParaMinimo: max(p.StockMinimo-p.Stock, 0)})
 	}
-	escribirJSON(w, http.StatusOK, lista)
+	return lista, nil
 }
 
-// GET /api/alertas/vencimientos
-func (a *app) alertasVencimientos(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := ctxConsulta(r)
-	defer cancel()
+// consultarVencimientos: lotes con existencias dentro de la ventana de alerta.
+func (a *app) consultarVencimientos(ctx context.Context) ([]alertaVencimiento, error) {
 	rows, err := a.db.QueryContext(ctx, `
 SELECT l.id, l.codigo_lote, p.id, p.nombre, p.marca, p.presentacion,
        l.fecha_vencimiento, l.cantidad_actual, l.costo_unitario,
@@ -1538,8 +1532,7 @@ WHERE p.activo = 1
   AND l.fecha_vencimiento <= CURRENT_DATE + INTERVAL p.dias_alerta_temprana DAY
 ORDER BY l.fecha_vencimiento, l.id`)
 	if err != nil {
-		errorInterno(w, r, err)
-		return
+		return nil, err
 	}
 	defer rows.Close()
 	lista := []alertaVencimiento{}
@@ -1549,15 +1542,34 @@ ORDER BY l.fecha_vencimiento, l.id`)
 		if err := rows.Scan(&al.LoteID, &al.CodigoLote, &al.ProductoID, &al.Producto, &al.Marca, &al.Presentacion,
 			&venc, &al.CantidadActual, &al.CostoUnitario, &al.ValorEnRiesgo, &al.DiasRestantes, &al.DiasAlertaLiquidacion,
 			&al.Proveedor, &al.ProveedorTelefono, &al.AceptaDevolucion); err != nil {
-			errorInterno(w, r, err)
-			return
+			return nil, err
 		}
 		al.FechaVencimiento = fechaTexto(venc)
 		al.Nivel = clasificarVencimiento(int(al.DiasRestantes), int(al.DiasAlertaLiquidacion))
 		al.AccionSugerida = sugerirAccion(al.Nivel, al.AceptaDevolucion != nil && *al.AceptaDevolucion)
 		lista = append(lista, al)
 	}
-	if err := rows.Err(); err != nil {
+	return lista, rows.Err()
+}
+
+// GET /api/alertas/stock-bajo
+func (a *app) alertasStockBajo(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	lista, err := a.consultarStockBajo(ctx)
+	if err != nil {
+		errorInterno(w, r, err)
+		return
+	}
+	escribirJSON(w, http.StatusOK, lista)
+}
+
+// GET /api/alertas/vencimientos
+func (a *app) alertasVencimientos(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := ctxConsulta(r)
+	defer cancel()
+	lista, err := a.consultarVencimientos(ctx)
+	if err != nil {
 		errorInterno(w, r, err)
 		return
 	}

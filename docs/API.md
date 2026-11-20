@@ -69,9 +69,14 @@ Motivos: vencimiento/deterioro/obsequio/devolucion/otro. Acciones: ninguna/venta
 | `DELETE /api/roles/{id}` | `roles.gestionar` | 204. 409 si es del sistema, si lo tiene asignado o si tiene usuarios (quíteselo o desactívelo). |
 | `PUT /api/usuarios/{id}/roles` | `roles.asignar` | `{roles:[ids]}` reemplaza los roles del usuario (lista vacía = sin roles). Devuelve lo mismo que `GET .../permisos`. 409 para usted mismo o si dejaría sin propietario activo; 403 si los roles anteriores o nuevos tienen permisos que usted no tiene. |
 | `GET /api/usuarios/{id}/permisos` | `usuarios.ver` | `{usuario,activo,roles:[{id,nombre,activo}],permisos:[{nombre,modulo,descripcion,critico,roles:[origen]}]}`: permisos efectivos y qué rol los otorga. |
-| `GET /api/auditoria` | `auditoria.ver` | Cambios de acceso, del más reciente: `{id,fecha,actor_id,actor,accion,entidad,entidad_id,detalle}`. Acciones: `rol.crear/editar/eliminar`, `usuario.crear/editar/roles`, `sistema.inicializar`. Admite `limite`/`offset`. |
+| `PUT /api/usuarios/{id}/permisos` | `roles.asignar` | `{overrides:[{permiso,concedido}]}` reemplaza los permisos personalizados (lista vacía = todo heredado del rol). Prioridad: personalizado > rol > denegado. 409 para usted mismo o si deniega algo a un Propietario; 403 si toca permisos que usted no tiene o el usuario tiene más permisos que usted. |
+| `GET /api/auditoria` | `auditoria.ver` | Cambios de acceso, del más reciente: `{id,fecha,actor_id,actor,accion,entidad,entidad_id,detalle}`. Acciones: `rol.crear/editar/eliminar`, `usuario.crear/editar/roles/permisos`, `sistema.inicializar`. Admite `limite`/`offset`. |
+| `GET /api/sugerencias` | `alertas.ver` | Recomendaciones pendientes del panel: `{clave,tipo,prioridad,titulo,motivo,accion,destino,producto_id,lote_id,cantidad,valor_en_riesgo}`, ordenadas por prioridad y valor en riesgo. |
+| `POST /api/sugerencias/decision` | `alertas.decidir` | `{clave,decision:aceptada|descartada}`; se guarda para todo el equipo. 404 si ya no está vigente; 409 si otra persona ya la decidió. |
 
-Un usuario recibe la unión de los permisos de sus roles **activos**. Los permisos se consultan en cada petición: los cambios aplican en la siguiente solicitud del usuario afectado, sin cerrar su sesión.
+`GET /api/usuarios/{id}/permisos` devuelve además `detalle` (cada permiso del catálogo con `heredado`, `override` y `efectivo`), `overrides` y `es_propietario`; en `permisos` cada efectivo indica `origen`: `rol` o `personalizado`.
+
+Un usuario recibe la unión de los permisos de sus roles **activos**, más los concedidos y menos los denegados de forma personalizada. Los permisos se consultan en cada petición: los cambios aplican en la siguiente solicitud del usuario afectado, sin cerrar su sesión.
 
 Rol de ejemplo:
 

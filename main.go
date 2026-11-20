@@ -35,6 +35,7 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	crearPropietario := flag.String("crear-propietario", "", "crear el primer propietario; contraseña por stdin")
 	restablecer := flag.String("restablecer-clave", "", "restablecer contraseña por email; contraseña por stdin")
+	verificar := flag.Bool("verificar", false, "solo comprobar conexión y tablas (antes de reemplazar el binario en producción)")
 	flag.Parse()
 
 	if err := cargarEnv(".env"); err != nil {
@@ -58,6 +59,16 @@ func main() {
 		log.Fatalf("no hay conexión con MySQL en %s (base %s): %v", cfg.DBHost, cfg.DBName, err)
 	}
 	log.Printf("conectado a MySQL %s, base %s", cfg.DBHost, cfg.DBName)
+
+	if *verificar {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := verificarEsquema(ctx, db); err != nil {
+			log.Fatalf("verificación fallida: %v", err)
+		}
+		log.Printf("verificación correcta: conexión y tablas listas; puede reemplazar el binario")
+		return
+	}
 
 	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
 	err = iniciarRBAC(ctx, db)
@@ -139,6 +150,7 @@ func (a *app) rutasAPI() []rutaAPI {
 		{"PUT /api/usuarios/{id}", "usuarios.editar", a.actualizarUsuario},
 		{"GET /api/usuarios/{id}/permisos", "usuarios.ver", a.permisosUsuario},
 		{"PUT /api/usuarios/{id}/roles", "roles.asignar", a.asignarRolesUsuario},
+		{"PUT /api/usuarios/{id}/permisos", "roles.asignar", a.asignarPermisosUsuario},
 		{"GET /api/permisos", "roles.ver", a.listarPermisos},
 		{"GET /api/roles", "roles.ver", a.listarRoles},
 		{"GET /api/roles/{id}", "roles.ver", a.obtenerRol},
@@ -182,6 +194,8 @@ func (a *app) rutasAPI() []rutaAPI {
 		{"GET /api/recomendaciones", "recomendaciones.consultar", a.recomendaciones},
 		{"GET /api/alertas/stock-bajo", "alertas.ver", a.alertasStockBajo},
 		{"GET /api/alertas/vencimientos", "alertas.ver", a.alertasVencimientos},
+		{"GET /api/sugerencias", "alertas.ver", a.listarSugerencias},
+		{"POST /api/sugerencias/decision", "alertas.decidir", a.decidirSugerencia},
 
 		// Respuesta 404/405 para el resto de /api/ (requiere sesión, no revela rutas).
 		{"/api/", accesoSesion, rutaNoEncontrada},
@@ -218,8 +232,24 @@ func (a *app) enrutador() *http.ServeMux {
 		panic(err)
 	}
 	archivos := http.StripPrefix("/granmanzana", http.FileServerFS(web))
+	indice, err := fs.ReadFile(web, "index.html")
+	if err != nil {
+		panic(err)
+	}
 	mux.Handle("GET /granmanzana/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Frame-Options", "DENY")
+		// Rutas de la aplicación (/granmanzana/login, /granmanzana/admin/usuarios, …):
+		// sin extensión y sin archivo propio, se responden con index.html y las
+		// resuelve el enrutador del navegador. Los recursos inexistentes siguen dando 404.
+		ruta := strings.TrimPrefix(r.URL.Path, "/granmanzana/")
+		if path.Ext(ruta) == "" {
+			if info, err := fs.Stat(web, strings.TrimSuffix(ruta, "/")); ruta == "" || err != nil || info.IsDir() {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Write(indice)
+				return
+			}
+		}
 		archivos.ServeHTTP(w, r)
 	}))
 

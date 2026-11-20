@@ -395,11 +395,7 @@ func (a *app) guardarUsuario(w http.ResponseWriter, r *http.Request, nuevo bool)
 		}
 		if id != actor.ID {
 			// Cambiar correo, clave o estado de alguien con más permisos permitiría suplantarlo.
-			roles, err := rolesDeUsuario(ctx, tx, id)
-			if err != nil {
-				return err
-			}
-			permisos, err := permisosDeRoles(ctx, tx, roles)
+			permisos, roles, err := permisosPotenciales(ctx, tx, id)
 			if err != nil {
 				return err
 			}

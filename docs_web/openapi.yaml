@@ -462,6 +462,41 @@ paths:
               schema: { $ref: '#/components/schemas/PermisosUsuario' }
         '404': { $ref: '#/components/responses/Error' }
 
+    put:
+      tags: [Roles y permisos]
+      summary: Reemplaza los permisos personalizados (overrides) de un usuario
+      description: |
+        Permiso: `roles.asignar`. Prioridad: personalizado > rol > denegado. Lista vacía = todo
+        heredado del rol. 409 para uno mismo o si deniega algo a un Propietario; 403 si toca permisos que
+        usted no tiene o el usuario tiene más permisos que usted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [overrides]
+              additionalProperties: false
+              properties:
+                overrides:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [permiso, concedido]
+                    properties:
+                      permiso: { type: string, example: reportes.ventas }
+                      concedido: { type: boolean, description: 'true = conceder, false = denegar' }
+      responses:
+        '200':
+          description: Permisos resultantes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PermisosUsuario' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
   /api/auditoria:
     get:
       tags: [Roles y permisos]
@@ -473,6 +508,41 @@ paths:
       responses:
         '200': { description: Entradas con id, fecha, actor, accion, entidad, entidad_id y detalle }
         '403': { $ref: '#/components/responses/Error' }
+
+  /api/sugerencias:
+    get:
+      tags: [Inventario]
+      summary: Recomendaciones pendientes del panel
+      description: 'Permiso: `alertas.ver`. Derivadas de las alertas; excluye las ya aceptadas o descartadas.'
+      responses:
+        '200':
+          description: Recomendaciones ordenadas por prioridad y valor en riesgo
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Sugerencia' } }
+
+  /api/sugerencias/decision:
+    post:
+      tags: [Inventario]
+      summary: Acepta o descarta una recomendación para todo el equipo
+      description: 'Permiso: `alertas.decidir`. 404 si ya no está vigente; 409 si otra persona ya la decidió.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clave, decision]
+              additionalProperties: false
+              properties:
+                clave: { type: string, example: 'lote:12:liquidar' }
+                decision: { type: string, enum: [aceptada, descartada] }
+      responses:
+        '200': { description: Decisión guardada }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
 
 components:
   parameters:
@@ -574,6 +644,37 @@ components:
               - type: object
                 properties:
                   roles: { type: array, items: { type: string }, description: Roles que otorgan el permiso }
+                  origen: { type: string, enum: [rol, personalizado] }
+        es_propietario: { type: boolean }
+        overrides:
+          type: array
+          items: { type: object, properties: { permiso: { type: string }, concedido: { type: boolean } } }
+        detalle:
+          type: array
+          description: Cada permiso del catálogo con su valor heredado, su personalización y el resultado.
+          items:
+            allOf:
+              - { $ref: '#/components/schemas/Permiso' }
+              - type: object
+                properties:
+                  roles: { type: array, items: { type: string } }
+                  heredado: { type: boolean }
+                  override: { type: string, enum: ['', concedido, denegado] }
+                  efectivo: { type: boolean }
+    Sugerencia:
+      type: object
+      properties:
+        clave: { type: string }
+        tipo: { type: string, enum: [vencido, liquidar, devolver, destacar, reponer] }
+        prioridad: { type: integer, enum: [1, 2, 3], description: '1 urgente, 2 pronto, 3 planear' }
+        titulo: { type: string }
+        motivo: { type: string }
+        accion: { type: string }
+        destino: { type: string, enum: [baja, lote, producto], description: A dónde lleva «Aceptar» }
+        producto_id: { type: integer }
+        lote_id: { type: integer }
+        cantidad: { type: integer }
+        valor_en_riesgo: { type: number }
     Categoria:
       type: object
       properties:

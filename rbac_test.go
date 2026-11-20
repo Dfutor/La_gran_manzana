@@ -145,3 +145,38 @@ func TestValidarUsuarioSinRol(t *testing.T) {
 		t.Fatal("admitió estado inválido")
 	}
 }
+
+func TestPrioridadOverrides(t *testing.T) {
+	f := fuentesPermisos{
+		deRoles:    conjunto([]string{"productos.ver", "ventas.crear"}),
+		concedidos: conjunto([]string{"reportes.ventas"}),
+		denegados:  conjunto([]string{"ventas.crear"}),
+	}
+	if got := ordenados(f.efectivos()); !reflect.DeepEqual(got, []string{"productos.ver", "reportes.ventas"}) {
+		t.Fatal("override > rol > denegado:", got)
+	}
+	f.propietario = true
+	if !f.efectivos()["ventas.crear"] {
+		t.Fatal("el rol Propietario ignora las denegaciones")
+	}
+}
+
+func TestValidarOverrides(t *testing.T) {
+	si, no := true, false
+	if _, p := validarOverrides(nil); p == "" {
+		t.Error("nil debe exigir la lista")
+	}
+	for _, l := range [][]overrideEntrada{
+		{{Permiso: "todo.hacer", Concedido: &si}},
+		{{Permiso: "productos.ver"}},
+		{{Permiso: "productos.ver", Concedido: &si}, {Permiso: "productos.ver", Concedido: &no}},
+	} {
+		if _, p := validarOverrides(l); p == "" {
+			t.Errorf("admitió %+v", l)
+		}
+	}
+	m, p := validarOverrides([]overrideEntrada{{Permiso: "productos.ver", Concedido: &si}, {Permiso: "ventas.crear", Concedido: &no}})
+	if p != "" || !m["productos.ver"] || m["ventas.crear"] || len(m) != 2 {
+		t.Fatal(m, p)
+	}
+}
