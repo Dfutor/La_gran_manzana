@@ -5,3 +5,6 @@
 # Configuración local de Claude Code
 .claude/settings.local.json
 /granmanzana
+/granmanzana-api.previous
+/granmanzana-api.new
+/granmanzana-api.rollback

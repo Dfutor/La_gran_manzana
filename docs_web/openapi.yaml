@@ -2,8 +2,14 @@ openapi: 3.0.3
 
 info:
   title: La Gran Manzana API
-  description: API REST de inventario por lotes FEFO y recomendaciones.
-  version: 1.0.0
+  description: |
+    API REST de inventario por lotes FEFO y recomendaciones.
+
+    **Autorización (RBAC):** salvo salud, login y logout, cada ruta exige sesión y un permiso
+    `modulo.accion` (por ejemplo `productos.ver`). Un usuario recibe la unión de los permisos de sus
+    roles activos; si le falta el permiso, la respuesta es 403 y el mensaje lo nombra.
+    El permiso de cada ruta figura en su descripción.
+  version: 1.1.0
 
 servers:
   - url: /
@@ -16,6 +22,7 @@ tags:
   - name: Inventario
   - name: Ventas
   - name: Reportes
+  - name: Roles y permisos
 
 paths:
   /api/login:
@@ -323,6 +330,150 @@ paths:
       responses:
         '200': { description: Alertas de vencimiento }
 
+  /api/permisos:
+    get:
+      tags: [Roles y permisos]
+      summary: Catálogo de permisos
+      description: 'Permiso: `roles.ver`. Los permisos se definen en el código.'
+      responses:
+        '200':
+          description: Catálogo
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Permiso' } }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /api/roles:
+    get:
+      tags: [Roles y permisos]
+      summary: Lista roles
+      description: 'Permiso: `roles.ver`.'
+      responses:
+        '200':
+          description: Roles con sus permisos y cantidad de usuarios
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Rol' } }
+        '403': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Roles y permisos]
+      summary: Crea un rol
+      description: 'Permiso: `roles.gestionar`. No se pueden otorgar permisos que uno no tiene (403).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RolEntrada' }
+      responses:
+        '201':
+          description: Rol creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rol' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/roles/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Roles y permisos]
+      summary: Obtiene un rol con sus usuarios
+      description: 'Permiso: `roles.ver`.'
+      responses:
+        '200':
+          description: Rol
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rol' }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      tags: [Roles y permisos]
+      summary: Reemplaza nombre, descripción, estado y permisos de un rol
+      description: |
+        Permiso: `roles.gestionar`. `activo: false` desactiva el rol sin quitar asignaciones.
+        409 si es el rol del sistema o un rol que usted tiene asignado; 403 si el rol (antes o
+        después) tiene permisos que usted no tiene.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RolEntrada' }
+      responses:
+        '200':
+          description: Rol actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rol' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [Roles y permisos]
+      summary: Elimina un rol sin usuarios
+      description: 'Permiso: `roles.gestionar`. 409 si es del sistema o tiene usuarios asignados.'
+      responses:
+        '204': { description: Rol eliminado }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/usuarios/{id}/roles:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Roles y permisos]
+      summary: Reemplaza los roles de un usuario
+      description: |
+        Permiso: `roles.asignar`. 409 para uno mismo o si dejaría la tienda sin propietario activo;
+        403 si los roles anteriores o nuevos tienen permisos que usted no tiene.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roles]
+              additionalProperties: false
+              properties:
+                roles: { type: array, maxItems: 50, items: { type: integer, minimum: 1 }, example: [2] }
+      responses:
+        '200':
+          description: Roles y permisos efectivos resultantes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PermisosUsuario' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /api/usuarios/{id}/permisos:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Roles y permisos]
+      summary: Permisos efectivos de un usuario y el rol que otorga cada uno
+      description: 'Permiso: `usuarios.ver`.'
+      responses:
+        '200':
+          description: Permisos efectivos
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PermisosUsuario' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /api/auditoria:
+    get:
+      tags: [Roles y permisos]
+      summary: Auditoría de cambios de acceso (más reciente primero)
+      description: 'Permiso: `auditoria.ver`.'
+      parameters:
+        - { name: limite, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200': { description: Entradas con id, fecha, actor, accion, entidad, entidad_id y detalle }
+        '403': { $ref: '#/components/responses/Error' }
+
 components:
   parameters:
     Id:
@@ -342,12 +493,87 @@ components:
   schemas:
     Usuario:
       type: object
+      description: Login y sesión devuelven además `permisos` efectivos.
       properties:
         id: { type: integer }
         nombre: { type: string }
         email: { type: string, format: email }
-        rol: { type: string }
-        estado: { type: string }
+        estado: { type: string, enum: [activo, inactivo] }
+        roles:
+          type: array
+          items: { $ref: '#/components/schemas/RolResumen' }
+        permisos:
+          type: array
+          items: { type: string }
+          example: [productos.ver, ventas.crear]
+    RolResumen:
+      type: object
+      properties:
+        id: { type: integer }
+        nombre: { type: string }
+        activo: { type: boolean }
+    Permiso:
+      type: object
+      properties:
+        nombre: { type: string, example: productos.ver }
+        modulo: { type: string, example: Productos }
+        descripcion: { type: string }
+        critico: { type: boolean }
+    Rol:
+      type: object
+      properties:
+        id: { type: integer }
+        nombre: { type: string }
+        descripcion: { type: string }
+        es_sistema: { type: boolean }
+        activo: { type: boolean }
+        permisos: { type: array, items: { type: string } }
+        cantidad_usuarios: { type: integer }
+        usuarios:
+          type: array
+          description: Solo en GET /api/roles/{id}.
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              nombre: { type: string }
+              email: { type: string }
+              estado: { type: string }
+    RolEntrada:
+      type: object
+      required: [nombre, permisos]
+      additionalProperties: false
+      properties:
+        nombre: { type: string, minLength: 1, maxLength: 60, example: Cajero }
+        descripcion: { type: string, maxLength: 255 }
+        activo: { type: boolean, default: true }
+        permisos:
+          type: array
+          maxItems: 200
+          items: { type: string }
+          example: [productos.ver, ventas.ver, ventas.crear]
+    PermisosUsuario:
+      type: object
+      properties:
+        usuario:
+          type: object
+          properties:
+            id: { type: integer }
+            nombre: { type: string }
+            email: { type: string }
+            estado: { type: string }
+        activo: { type: boolean }
+        roles:
+          type: array
+          items: { $ref: '#/components/schemas/RolResumen' }
+        permisos:
+          type: array
+          items:
+            allOf:
+              - { $ref: '#/components/schemas/Permiso' }
+              - type: object
+                properties:
+                  roles: { type: array, items: { type: string }, description: Roles que otorgan el permiso }
     Categoria:
       type: object
       properties:
